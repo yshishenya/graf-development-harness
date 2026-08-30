@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "feature_directory": "specs/001-example",
+  "feature_id": "001",
+  "owner": "sample-owner",
+  "risk_lane": "tiny-low-risk",
+  "owned_paths": ["specs/001-example", "changes/unreleased/F001.yaml"]
+}

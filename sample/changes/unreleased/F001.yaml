@@ -1,0 +1,8 @@
+schema_version: 1
+feature_id: 001
+category: Docs
+summary: "Пример подключения переносимого harness."
+issue: 1
+tasks: [T001]
+compatibility: "Только пример; продуктовый runtime не меняется."
+release_notes: "Добавить запись в release train."
