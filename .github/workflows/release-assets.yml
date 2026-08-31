@@ -1,0 +1,56 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  assets:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout published tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify release version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          test "$RELEASE_TAG" = "v$(cat VERSION)"
+          test "$(git describe --tags --exact-match HEAD)" = "$RELEASE_TAG"
+
+      - name: Run package safety gate before building
+        run: PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
+
+      - name: Build package assets
+        run: |
+          python -m pip install --disable-pip-version-check build
+          python -m build --outdir release-assets
+
+      - name: Create checksums and provenance
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          source_sha=$(git rev-parse HEAD)
+          python scripts/create-release-assets.py \
+            --repository "${GITHUB_REPOSITORY}" \
+            --version "${RELEASE_TAG#v}" \
+            --source-sha "$source_sha" \
+            --output-dir release-assets
+
+      - name: Upload immutable release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber

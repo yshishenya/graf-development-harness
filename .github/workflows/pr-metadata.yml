@@ -1,0 +1,41 @@
+name: PR metadata
+
+on:
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  validate:
+    name: Validate PR metadata
+    runs-on: ubuntu-latest
+    steps:
+      # pull_request_target intentionally checks out the base branch. The PR
+      # body is treated as data and is never interpolated into shell code.
+      - name: Checkout trusted validator
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Write PR body as data
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            fs.writeFileSync('pr-body.md', context.payload.pull_request.body || '', {encoding: 'utf8', mode: 0o600});
+
+      - name: Validate feature-linked PR contract
+        env:
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          feature_id=$(python3 -c 'import os, re; body = open("pr-body.md", encoding="utf-8").read(); branch = re.search(r"(?:^|/)([0-9]{3,})-", os.environ["PR_HEAD_REF"]); marker = re.search(r"Feature ID:\s*`?F?([0-9]{3,})", body); print((branch or marker).group(1) if (branch or marker) else "")')
+          test -n "$feature_id"
+          PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --pr-body pr-body.md --feature-id "$feature_id"
