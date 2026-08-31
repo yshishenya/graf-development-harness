@@ -76,10 +76,12 @@ publish a SHA-256 checksum next to each release artifact (for example,
 `sha256sum dist/* > SHA256SUMS`). Keep the checksum and source commit in the
 release provenance record; do not generate or commit build artifacts here.
 
-The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.10`;
-`v0.1.9` remains the rollback ref. A consumer must pin the immutable release
-and update its migration notes and rollback ref together.
+The next public release candidate is `v0.1.10` and will be pinned at
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.10`
+only after its reviewer gate, tag and GitHub Release are complete. Until then,
+consumers must continue to pin the current public immutable `v0.1.9` release;
+it is also the rollback ref for the `v0.1.10` migration. A consumer must pin
+the immutable release and update its migration notes and rollback ref together.
 
 Migration from `v0.1.9` to `v0.1.10` requires existing `.specify/feature.json`
 files to add the active `branch` and full 40-character `source_sha` fields;
