@@ -5,6 +5,7 @@ import argparse
 import json
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -71,15 +72,95 @@ def legacy(spec: Path) -> list[str]:
     return []
 
 
+def package_consistency(package_root: Path) -> list[str]:
+    """Check the three user-visible package version declarations."""
+    errors: list[str] = []
+    try:
+        version_file = (package_root / "VERSION").read_text(encoding="utf-8").strip()
+        pyproject = (package_root / "pyproject.toml").read_text(encoding="utf-8")
+        init = (package_root / "src" / "dev_harness" / "__init__.py").read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"package metadata is incomplete: {exc}"]
+    project_match = re.search(r'^version\s*=\s*"([^"]+)"\s*$', pyproject, re.MULTILINE)
+    runtime_match = re.search(r'^__version__\s*=\s*"([^"]+)"\s*$', init, re.MULTILINE)
+    if not project_match or not runtime_match:
+        return ["package metadata must declare version in pyproject.toml and __init__.py"]
+    declared = {version_file, project_match.group(1), runtime_match.group(1)}
+    if len(declared) != 1:
+        errors.append("package version mismatch: " + ", ".join(sorted(declared)))
+    if not re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", version_file):
+        errors.append("VERSION must use SemVer MAJOR.MINOR.PATCH")
+    return errors
+
+
+def package_safety(package_root: Path) -> list[str]:
+    """Reject secrets, private paths and generated artifacts before publishing."""
+    errors: list[str] = []
+    forbidden = re.compile(
+        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:api[_-]?key|secret|password|bearer)\s*[:=]|"
+        r"/(?:Users|home|private/var|Volumes)/[^\s/]+/[^\s]+",
+        re.IGNORECASE,
+    )
+    for path in sorted(package_root.rglob("*")):
+        relative = path.relative_to(package_root)
+        if path.is_symlink():
+            errors.append(f"symlink is not publishable: {relative}")
+            continue
+        if path.is_dir() or ".git" in path.parts:
+            continue
+        # The scanner's own pattern literals are policy text, not credentials.
+        if relative == Path("src/dev_harness/validators.py"):
+            continue
+        if path.suffix in {".pyc", ".pyo"} or ".egg-info" in path.parts or path.name in {".DS_Store"}:
+            errors.append(f"generated artifact is not publishable: {relative}")
+            continue
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            errors.append(f"cannot read package file {relative}: {exc}")
+            continue
+        if b"\x00" in data:
+            errors.append(f"binary file is not publishable: {relative}")
+            continue
+        if forbidden.search(data.decode("utf-8", errors="ignore")):
+            errors.append(f"forbidden secret/private content: {relative}")
+    return errors
+
+
+def self_test() -> int:
+    with tempfile.TemporaryDirectory(prefix="development-harness-") as directory:
+        root = Path(directory)
+        (root / ".specify").mkdir()
+        (root / "specs/001-example").mkdir(parents=True)
+        (root / "specs/001-example/spec.md").write_text(
+            "# Example\n\n## Legacy Impact\n\nClassification: untouched\n", encoding="utf-8"
+        )
+        (root / ".specify/feature.json").write_text(
+            json.dumps({"feature_directory": "specs/001-example", "feature_id": "001", "owner": "test", "risk_lane": "low", "owned_paths": ["specs/001-example"]}),
+            encoding="utf-8",
+        )
+        assert context(root) == []
+        assert legacy(root / "specs/001-example/spec.md") == []
+    print("harness-check: self-test OK")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, nargs="?", default=Path.cwd())
     parser.add_argument("--spec", type=Path)
+    parser.add_argument("--package-root", type=Path)
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
+    if args.self_test:
+        return self_test()
     root = args.root.resolve()
     errors = context(root) + fragments(root)
     if args.spec:
         errors += legacy(args.spec.resolve())
+    if args.package_root:
+        package_root = args.package_root.resolve()
+        errors += package_consistency(package_root) + package_safety(package_root)
     if errors:
         for error in errors:
             print(f"harness-check: ERROR: {error}", file=sys.stderr)

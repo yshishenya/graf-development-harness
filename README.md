@@ -39,3 +39,8 @@ Project adapters may add real build, health, signing and deployment probes, but
 must preserve the exact-SHA, loopback-only, one-active-target and fail-closed
 contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
+
+The current public release is
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.4`;
+`v0.1.3` remains the rollback ref. Generic schema/CI/release-contract
+expansion is tracked in issue #3 and must preserve the GRAF adapter boundary.
