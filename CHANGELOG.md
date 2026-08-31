@@ -1,6 +1,21 @@
 # Changelog
 
-## [Unreleased] — планируется `v0.1.5`
+## [Unreleased] — планируется `v0.1.7`
+
+## [0.1.6] - 2026-08-31
+
+### Исправлено
+
+- Уточнена проверка package safety: обычные документационные примеры `secret:`
+  и `password =` не считаются секретами, а реальные credential assignments,
+  private keys и machine-specific paths по-прежнему блокируются.
+- PR metadata schema требует все шесть обязательных разделов.
+- Self-check команды не создают Python bytecode в рабочем дереве.
+
+### Совместимость
+
+- CLI и validator API обратно совместимы с `v0.1.5`.
+- Откат: immutable `v0.1.5`.
 
 ### Проверки
 

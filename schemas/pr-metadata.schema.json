@@ -34,6 +34,7 @@
     },
     "required_sections": {
       "type": "array",
+      "minItems": 6,
       "uniqueItems": true,
       "items": {
         "type": "string",

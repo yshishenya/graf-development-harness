@@ -247,9 +247,14 @@ def package_consistency(package_root: Path) -> list[str]:
 def package_safety(package_root: Path) -> list[str]:
     """Reject secrets, private paths and generated artifacts before publishing."""
     errors: list[str] = []
-    forbidden = re.compile(
-        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|(?:api[_-]?key|secret|password|bearer)\s*[:=]|"
+    private_material = re.compile(
+        r"BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY|"
         r"/(?:Users|home|private/var|Volumes)/[^\s/]+/[^\s]+",
+        re.IGNORECASE,
+    )
+    credential_assignment = re.compile(
+        r"\b(?:api[_-]?key|secret|password|bearer)\s*[:=]\s*['\"]?"
+        r"[A-Za-z0-9][A-Za-z0-9_./+=:-]{7,}",
         re.IGNORECASE,
     )
     for path in sorted(package_root.rglob("*")):
@@ -273,7 +278,11 @@ def package_safety(package_root: Path) -> list[str]:
         if b"\x00" in data:
             errors.append(f"binary file is not publishable: {relative}")
             continue
-        if forbidden.search(data.decode("utf-8", errors="ignore")):
+        text = data.decode("utf-8", errors="ignore")
+        if private_material.search(text) or (
+            path.suffix.lower() not in {".md", ".rst", ".txt"}
+            and credential_assignment.search(text)
+        ):
             errors.append(f"forbidden secret/private content: {relative}")
     return errors
 

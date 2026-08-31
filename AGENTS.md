@@ -19,9 +19,9 @@ consumer adapter.
 ## Check
 
 ```sh
-(./bin/harness-check --self-test)
-(cd sample && ../bin/harness-check --spec specs/001-example/spec.md)
-./bin/harness-check --package-root .
+PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test
+(cd sample && PYTHONDONTWRITEBYTECODE=1 ../bin/harness-check --spec specs/001-example/spec.md)
+PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'import dev_harness; print(dev_harness.__version__)'
 ```
 
