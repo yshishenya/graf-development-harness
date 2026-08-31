@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:development-process-harness:ci-receipt:v1",
+  "title": "Metadata-only CI receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "event_name", "workflow", "run_id", "run_attempt", "workflow_url", "target_sha", "base_sha", "pull_request_numbers", "merge_group_id", "requested_sha", "observed_sha_start", "observed_sha_end", "final_cleanliness", "local_evidence_digest", "started_at", "finished_at"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "status": {"type": "string", "enum": ["passed", "failed", "cancelled", "superseded", "stale", "ambiguous"]},
+    "event_name": {"type": "string", "enum": ["pull_request", "merge_group", "workflow_dispatch"]},
+    "workflow": {"type": "string", "minLength": 1, "maxLength": 160},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,160}$"},
+    "run_attempt": {"type": "integer", "minimum": 1},
+    "workflow_url": {"type": "string", "pattern": "^https://[^\\s]+$"},
+    "target_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "base_sha": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{40}$"},
+    "pull_request_numbers": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+    "merge_group_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9._:-]{1,256}$"},
+    "requested_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "observed_sha_start": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "observed_sha_end": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "final_cleanliness": {"type": "string", "enum": ["pass", "fail", "stale", "ambiguous"]},
+    "final_cleanliness_reason": {"type": "string", "minLength": 1, "maxLength": 512},
+    "local_evidence_digest": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 1024},
+    "conclusion": {"type": "string", "enum": ["passed", "failed", "cancelled", "superseded", "stale", "ambiguous"]},
+    "concurrency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$"},
+    "cancellation_state": {"type": "string", "enum": ["none", "cancelled"]},
+    "supersession_state": {"type": "string", "enum": ["none", "superseded"]}
+  },
+  "allOf": [
+    {"if": {"properties": {"event_name": {"enum": ["pull_request", "merge_group"]}}}, "then": {"required": ["base_sha"]}},
+    {"if": {"properties": {"event_name": {"const": "merge_group"}}}, "then": {"required": ["merge_group_id"]}},
+    {"if": {"not": {"properties": {"status": {"const": "passed"}}}}, "then": {"required": ["reason"]}}
+  ]
+}

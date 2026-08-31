@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:development-process-harness:event-identity:v1",
+  "title": "Resolved CI event identity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "event_name", "target_sha", "base_sha", "pull_request_numbers", "merge_group_id", "concurrency_key"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "event_name": {"type": "string", "enum": ["pull_request", "merge_group", "workflow_dispatch"]},
+    "target_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "base_sha": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{40}$"},
+    "pull_request_numbers": {"type": "array", "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+    "merge_group_id": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9._:-]{1,512}$"},
+    "concurrency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$"}
+  }
+}

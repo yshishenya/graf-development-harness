@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "train_id": "train-example",
+  "source_sha": "0000000000000000000000000000000000000000",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "synthetic_merge_sha": null,
+  "included_prs": [1],
+  "feature_ids": ["001"],
+  "merge_group_ids": [],
+  "pr_receipts": [],
+  "merge_group_receipts": [],
+  "changelog_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "authoritative_full_ci_receipt": null,
+  "decision": "pending",
+  "rollback_target": "previous-successful-release"
+}
