@@ -170,8 +170,8 @@ _PRIVATE_PATH_RE = re.compile(
     re.IGNORECASE,
 )
 _CREDENTIAL_RE = re.compile(
-    r"(?:api[_-]?key|secret|password|token|bearer|cookie|signed[-_ ]?url)"
-    r"\s*[:=]\s*[^\s,;]{8,}", re.IGNORECASE
+    r"(?:api[_-]?key|secret|password|token|cookie|signed[-_ ]?url)"
+    r"\s*[:=]\s*[^\s,;]{8,}|bearer\s+[^\s,;]{8,}", re.IGNORECASE
 )
 _SENSITIVE_FIELD_RE = re.compile(
     r"(?:raw[_ -]?transcript|transcript[_ -]?text|raw[_ -]?audio|private[_ -]?meeting)",
@@ -502,6 +502,9 @@ def self_test() -> int:
     ))
     assert any("RFC3339 UTC timestamp" in error for error in ci_evidence(
         dict(good_evidence, started_at="2026-08-31T00:00:00.1234567Z")
+    ))
+    assert any("forbidden private or credential" in error for error in ci_evidence(
+        dict(good_evidence, scope="Authorization: Bearer abcdefghijkl")
     ))
 
     good_pr = (
