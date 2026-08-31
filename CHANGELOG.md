@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.12] - 2026-09-01
+
+### Исправлено
+
+- Проверка CI evidence теперь fail-closed распознает любой bearer-токен,
+  включая короткие значения и форму `Authorization: Bearer ...`.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.11`.
+- Откат: immutable `v0.1.11`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test, package-safety scan и runtime-version
+  check — PASS.
+
 ## [0.1.11] - 2026-08-31
 
 ### Исправлено

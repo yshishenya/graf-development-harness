@@ -171,7 +171,8 @@ _PRIVATE_PATH_RE = re.compile(
 )
 _CREDENTIAL_RE = re.compile(
     r"(?:api[_-]?key|secret|password|token|cookie|signed[-_ ]?url)"
-    r"\s*[:=]\s*[^\s,;]{8,}|bearer\s+[^\s,;]{8,}", re.IGNORECASE
+    r"\s*[:=]\s*[^\s,;]{8,}|"
+    r"(?:authorization\s*:\s*)?bearer\s+[^\s,;]{1,}", re.IGNORECASE
 )
 _SENSITIVE_FIELD_RE = re.compile(
     r"(?:raw[_ -]?transcript|transcript[_ -]?text|raw[_ -]?audio|private[_ -]?meeting)",
@@ -505,6 +506,9 @@ def self_test() -> int:
     ))
     assert any("forbidden private or credential" in error for error in ci_evidence(
         dict(good_evidence, scope="Authorization: Bearer abcdefghijkl")
+    ))
+    assert any("forbidden private or credential" in error for error in ci_evidence(
+        dict(good_evidence, scope="authorization: bearer x")
     ))
 
     good_pr = (
