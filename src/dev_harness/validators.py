@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import hashlib
 import json
 import re
@@ -96,15 +97,23 @@ def legacy(spec: Path) -> list[str]:
     )
     if len(classifications) != 1:
         return [f"{spec}: Legacy Impact classification is invalid"]
-    if classifications[0].lower() == "retain-with-exception" and any(
-        not re.search(
-            rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(token)}(?:\*\*)?[ \t]*:[ \t]*\S",
-            section,
-            re.IGNORECASE | re.MULTILINE,
-        )
-        for token in ("owner", "expiry", "trigger", "retirement task")
-    ):
-        return [f"{spec}: compatibility exception needs owner, expiry, trigger and retirement task"]
+    if classifications[0].lower() == "retain-with-exception":
+        for token in ("owner", "expiry", "trigger", "retirement task"):
+            field = re.search(
+                rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(token)}(?:\*\*)?[ \t]*:[ \t]*(\S.*)$",
+                section,
+                re.IGNORECASE | re.MULTILINE,
+            )
+            if not field:
+                return [f"{spec}: compatibility exception needs owner, expiry, trigger and retirement task"]
+            if token == "expiry":
+                value = field.group(1).strip().strip("`'\"")
+                try:
+                    expiry = dt.date.fromisoformat(value)
+                except ValueError:
+                    return [f"{spec}: compatibility exception needs an ISO expiry date"]
+                if expiry < dt.date.today():
+                    return [f"{spec}: expired legacy exception {value}"]
     return []
 
 
@@ -340,10 +349,7 @@ def package_safety(package_root: Path) -> list[str]:
             errors.append(f"binary file is not publishable: {relative}")
             continue
         text = data.decode("utf-8", errors="ignore")
-        if private_material.search(text) or (
-            path.suffix.lower() not in {".md", ".rst", ".txt"}
-            and credential_assignment.search(text)
-        ):
+        if private_material.search(text) or credential_assignment.search(text):
             errors.append(f"forbidden secret/private content: {relative}")
     return errors
 
@@ -412,11 +418,30 @@ def self_test() -> int:
             encoding="utf-8",
         )
         assert legacy(root / "specs/001-example/spec.md") == []
+        (root / "specs/001-example/spec.md").write_text(
+            "# Example\n\n## Legacy Impact\n\n"
+            "Classification: retain-with-exception\n"
+            "owner: platform\nexpiry: 2099-12-31\ntrigger: migration complete\n"
+            "retirement task: T999\n",
+            encoding="utf-8",
+        )
+        assert legacy(root / "specs/001-example/spec.md") == []
+        (root / "specs/001-example/spec.md").write_text(
+            "# Example\n\n## Legacy Impact\n\n"
+            "Classification: retain-with-exception\n"
+            "owner: platform\nexpiry: yesterday\ntrigger: migration complete\n"
+            "retirement task: T999\n",
+            encoding="utf-8",
+        )
+        assert any("ISO expiry date" in error for error in legacy(root / "specs/001-example/spec.md"))
         package = root / "package"
         (package / "src/dev_harness").mkdir(parents=True)
         (package / "src/dev_harness/validators.py").write_text(
             "pass" + "word = \"" + "x" * 24 + "\"\n", encoding="utf-8"
         )
+        assert package_safety(package)
+        documentation = package / "README.md"
+        documentation.write_text("api" + '_key = "RealCredential123456"\n', encoding="utf-8")
         assert package_safety(package)
     print("harness-check: self-test OK")
     return 0

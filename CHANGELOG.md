@@ -1,11 +1,31 @@
 # Changelog
 
+## [0.1.9] - 2026-08-31
+
+### Исправлено
+
+- Portable `Legacy Impact` теперь требует корректную будущую ISO-дату expiry для compatibility exceptions.
+- Package-safety scan проверяет credential assignments и в документации, не принимая реальные ключи за безопасный пример.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.8`.
+- Откат: immutable `v0.1.8`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test и recursive package-safety/provenance scan — PASS.
+
+### Ограничения
+
+- Product-specific capture, privacy, signing, deployment и data gates остаются adapter-контрактом потребителя.
+
 ## [0.1.8] - 2026-08-31
 
 ### Исправлено
 
 - Усилена проверка portable context: feature directory, `spec.md`, numeric ID и symlink containment.
-- Уточнена проверка Legacy Impact и поддержан безопасный комментарий после classification.
+- Уточнена проверка Legacy Impact; разрешён безопасный комментарий после classification.
 - Artifact identities ограничены безопасным форматом; `source-revision` связывается с observed SHA.
 - Добавлен bounded Codex skill для progressive disclosure и bounded context.
 
@@ -16,9 +36,8 @@
 
 ### Проверки
 
-- `PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test` — PASS.
-- Clean sample smoke-test и recursive package-safety/provenance scan — PASS.
-- Публикация выполнена из чистого exact commit.
+- Self-test, clean sample smoke-test и recursive package-safety/provenance scan — PASS.
+- Публичный immutable release создан из exact commit `1d9f5c3ffb242f6480032958000fce40740a10b7`.
 
 ### Ограничения
 
