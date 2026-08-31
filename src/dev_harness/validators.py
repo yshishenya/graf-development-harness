@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
+import io
 import json
 import re
 import subprocess
@@ -557,8 +559,9 @@ def self_test() -> int:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md") as pr_body:
         pr_body.write(good_pr)
         pr_body.flush()
-        assert main(["--pr-body", pr_body.name, "--feature-id", "216"]) == 0
-        assert main(["--pr-body", pr_body.name, "--feature-id", "215"]) == 1
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            assert main(["--pr-body", pr_body.name, "--feature-id", "216"]) == 0
+            assert main(["--pr-body", pr_body.name, "--feature-id", "215"]) == 1
 
     with tempfile.TemporaryDirectory(prefix="development-harness-") as directory:
         root = Path(directory)
