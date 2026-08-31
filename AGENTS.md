@@ -14,7 +14,9 @@ consumer adapter.
 - Prefer stdlib/native code and the smallest safe diff. Preserve fail-closed
   validation and leave one runnable self-test for new non-trivial behavior.
 - Consumers pin an immutable release and provide their own adapter for build,
-  health, signing and deployment behavior.
+  health, signing and deployment behavior. When upgrading to `v0.1.10`, add
+  `branch` and `source_sha` to existing feature pointers before running the
+  checker; see README.md for the migration and checksum/provenance record.
 - For a complete repeatable workflow, load `skills/development-process/SKILL.md`;
   keep this always-on file as the short router.
 - Codex instruction files are layered global → project → nested directory;
@@ -26,7 +28,10 @@ consumer adapter.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test
-(cd sample && PYTHONDONTWRITEBYTECODE=1 ../bin/harness-check --spec specs/001-example/spec.md)
+sample_check_dir=$(mktemp -d)
+harness_root=$(pwd)
+git archive HEAD sample | tar -x -C "$sample_check_dir"
+(cd "$sample_check_dir/sample" && PYTHONDONTWRITEBYTECODE=1 "$harness_root/bin/harness-check" --spec specs/001-example/spec.md)
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'import dev_harness; print(dev_harness.__version__)'
 ```

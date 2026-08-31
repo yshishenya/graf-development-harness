@@ -8,7 +8,7 @@
 
 - Exact source SHA и observed SHA:
 - CI evidence:
-- Команда и результат: `./infra/scripts/ci-local.sh --fast` — PASS/FAIL/BLOCKED
+- Команда и результат: `./infra/scripts/ci-local.sh --fast` — <actual CI result>
 
 ## Risk / validation lane
 

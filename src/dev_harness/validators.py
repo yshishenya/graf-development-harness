@@ -51,10 +51,22 @@ def context(root: Path) -> list[str]:
         errors.append("branch must be a non-empty string")
     if source_sha and (not isinstance(source_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", source_sha, re.IGNORECASE)):
         errors.append("source_sha must be a full 40-character git SHA")
-    # A standalone sample fixture may not have its own .git directory. Real
-    # consumer roots do, and their pointer must describe the checkout actually
-    # being used; no timestamp or newest-directory fallback is permitted.
-    if (root / ".git").exists() and isinstance(branch, str) and branch.strip() and isinstance(source_sha, str) and re.fullmatch(r"[0-9a-f]{40}", source_sha, re.IGNORECASE):
+    # A standalone sample fixture may not be inside a Git worktree. For a
+    # consumer nested in a monorepo, ``git -C`` still resolves the enclosing
+    # worktree even when ``root/.git`` is absent; no timestamp or
+    # newest-directory fallback is permitted.
+    in_git_worktree = False
+    try:
+        subprocess.check_output(
+            ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    else:
+        in_git_worktree = True
+    if in_git_worktree and isinstance(branch, str) and branch.strip() and isinstance(source_sha, str) and re.fullmatch(r"[0-9a-f]{40}", source_sha, re.IGNORECASE):
         try:
             current_branch = subprocess.check_output(
                 ["git", "-C", str(root), "branch", "--show-current"], text=True, stderr=subprocess.DEVNULL
@@ -390,8 +402,10 @@ def pr_metadata(body: Any, feature_id: str) -> list[str]:
     if not lane or lane.group(1).lower() in {"tbd", "todo", "unknown", "placeholder"}:
         errors.append("Risk / validation lane requires a concrete Lane")
     verification_section = sections.get("## Как проверено", "")
-    has_command = bool(re.search(r"`[^`\n]+`", verification_section))
-    has_result = bool(re.search(r"\b(?:pass(?:ed)?|fail(?:ed)?|not[ -]?run|blocked)\b", verification_section, re.IGNORECASE))
+    command_spans = re.findall(r"`[^`\n]+`", verification_section)
+    has_command = bool(command_spans)
+    result_text = re.sub(r"`[^`\n]+`", "", verification_section)
+    has_result = bool(re.search(r"\b(?:pass(?:ed)?|fail(?:ed)?|not[ -]?run|blocked)\b", result_text, re.IGNORECASE))
     if not has_command or not has_result:
         errors.append("Как проверено requires command and result evidence")
     marker = re.search(r"Feature ID:\s*`?F?(\d{3,})", body)
@@ -506,6 +520,9 @@ def self_test() -> int:
     assert any("forbidden private or credential" in error for error in ci_evidence(
         dict(good_evidence, scope="Authorization: Bearer abcdefghijkl")
     ))
+    assert any("forbidden private or credential" in error for error in ci_evidence(
+        dict(good_evidence, scope="Authorization:\tBearer\tabcdefghijkl")
+    ))
 
     good_pr = (
         "## Feature identity\nFeature ID: `F216`\nUmbrella issue: `#6090`\nSpec task IDs: `T042`\n"
@@ -523,6 +540,8 @@ def self_test() -> int:
     )
     assert any("command and result evidence" in error for error in pr_metadata(empty_quality, "216"))
     assert any("concrete Lane" in error for error in pr_metadata(empty_quality, "216"))
+    command_without_result = good_pr.replace("- `ci --fast`: passed", "- `pytest --failed-first`")
+    assert any("command and result evidence" in error for error in pr_metadata(command_without_result, "216"))
 
     with tempfile.TemporaryDirectory(prefix="development-harness-") as directory:
         root = Path(directory)
@@ -547,6 +566,41 @@ def self_test() -> int:
         )
         assert context(root) == []
         assert legacy(root / "specs/001-example/spec.md") == []
+
+        nested_repo = root / "nested-consumer"
+        nested_project = nested_repo / "app"
+        (nested_project / ".specify").mkdir(parents=True)
+        (nested_project / "specs/001-example").mkdir(parents=True)
+        (nested_project / "specs/001-example/spec.md").write_text(
+            "# Example\n\n## Legacy Impact\n\nClassification: untouched\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "-C", str(nested_repo), "init", "-q"], check=True)
+        subprocess.run(["git", "-C", str(nested_repo), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(nested_repo), "config", "user.name", "Harness Test"], check=True)
+        (nested_repo / "README.md").write_text("fixture\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(nested_repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(nested_repo), "commit", "-q", "-m", "fixture"], check=True)
+        nested_branch = subprocess.check_output(
+            ["git", "-C", str(nested_repo), "branch", "--show-current"], text=True
+        ).strip()
+        nested_sha = subprocess.check_output(
+            ["git", "-C", str(nested_repo), "rev-parse", "HEAD"], text=True
+        ).strip()
+        (nested_project / ".specify/feature.json").write_text(
+            json.dumps(
+                {
+                    "feature_directory": "specs/001-example",
+                    "feature_id": "001",
+                    "branch": nested_branch,
+                    "source_sha": nested_sha,
+                    "owner": "test",
+                    "risk_lane": "low",
+                    "owned_paths": ["specs/001-example"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        assert context(nested_project) == []
         (root / "specs/001-example/spec.md").write_text(
             "# Example\n\n## Legacy Impact\n\n- Classification: `untouched`; no legacy surface is changed.\n",
             encoding="utf-8",

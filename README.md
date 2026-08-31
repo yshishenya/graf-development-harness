@@ -38,7 +38,10 @@ commands are the source-tree self-check and must work from a clean checkout:
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test
-(cd sample && PYTHONDONTWRITEBYTECODE=1 ../bin/harness-check --spec specs/001-example/spec.md)
+sample_check_dir=$(mktemp -d)
+harness_root=$(pwd)
+git archive HEAD sample | tar -x -C "$sample_check_dir"
+(cd "$sample_check_dir/sample" && PYTHONDONTWRITEBYTECODE=1 "$harness_root/bin/harness-check" --spec specs/001-example/spec.md)
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
 ```
 
@@ -66,15 +69,24 @@ this directory as the repository root.
 Project adapters may add real build, health, signing and deployment probes, but
 must preserve the exact-SHA, loopback-only, one-active-target and fail-closed
 contracts. Each published version is immutable SemVer and requires a checksum,
-migration notes, secret/path scan and a rollback ref.
+metadata-only provenance evidence, migration notes, secret/path scan and a
+rollback ref. Before publishing, run the checks above against the final
+commit, record that exact commit SHA in the release notes and PR body, and
+publish a SHA-256 checksum next to each release artifact (for example,
+`sha256sum dist/* > SHA256SUMS`). Keep the checksum and source commit in the
+release provenance record; do not generate or commit build artifacts here.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.9`;
-`v0.1.8` remains the rollback ref. A consumer must pin the immutable release
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.10`;
+`v0.1.9` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-Migration from `v0.1.8` to `v0.1.9` adds ISO/future expiry validation for
-legacy exceptions and scans documentation for credential assignments while
-still allowing field-name examples. Consumers should run the same self-test
-and package scan after updating their pinned ref. Rollback is the immutable
-`v0.1.8` ref.
+Migration from `v0.1.9` to `v0.1.10` requires existing `.specify/feature.json`
+files to add the active `branch` and full 40-character `source_sha` fields;
+the values must match the checkout used by the consumer. It also makes CI
+evidence timestamps strict RFC3339 UTC (with at most six fractional digits),
+rejects unknown `-00:00` offsets and standard `Authorization: Bearer` token
+syntax, and requires an explicit command/result in PR evidence. Consumers
+should update their pointer and PR template, then run the same self-test and
+package scan against the pinned immutable ref. Rollback is the immutable
+`v0.1.9` ref.

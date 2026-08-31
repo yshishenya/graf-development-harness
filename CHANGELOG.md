@@ -6,15 +6,21 @@
 
 - Portable context теперь требует branch и source SHA и сверяет их с текущим checkout.
 - CI evidence требует RFC3339 UTC timestamps и корректный порядок времени.
+- Schema CI evidence синхронизирована с timestamp contract; стандартный
+  `Authorization: Bearer` формат блокируется в metadata-only evidence.
+- Проверка context работает и для consumer-подкаталогов внутри Git worktree.
 
 ### Совместимость
 
-- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.9`.
+- Python 3.9+; CLI и validator API сохраняют API, но существующие feature
+  pointers требуют миграции с `v0.1.9` (см. README.md).
 - Откат: immutable `v0.1.9`.
 
 ### Проверки
 
-- Self-test, clean sample smoke-test и recursive package-safety/provenance scan — PASS.
+- Self-test, clean sample smoke-test и recursive package-safety/provenance scan
+  должны быть выполнены на финальном exact source SHA перед публикацией; SHA
+  фиксируется в PR body и release provenance record.
 
 ### Ограничения
 
