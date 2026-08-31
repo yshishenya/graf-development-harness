@@ -554,6 +554,11 @@ def self_test() -> int:
         "- `ci --fast`: passed", "- `pytest`\n```sh\npytest --last-failed\n```"
     )
     assert any("command and result evidence" in error for error in pr_metadata(fenced_command_without_result, "216"))
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".md") as pr_body:
+        pr_body.write(good_pr)
+        pr_body.flush()
+        assert main(["--pr-body", pr_body.name, "--feature-id", "216"]) == 0
+        assert main(["--pr-body", pr_body.name, "--feature-id", "215"]) == 1
 
     with tempfile.TemporaryDirectory(prefix="development-harness-") as directory:
         root = Path(directory)
@@ -684,23 +689,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("root", type=Path, nargs="?", default=Path.cwd())
     parser.add_argument("--spec", type=Path)
     parser.add_argument("--package-root", type=Path)
+    parser.add_argument("--pr-body", type=Path, help="path to a pull-request body")
+    parser.add_argument("--feature-id", help="expected numeric feature ID for --pr-body")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
+    if args.feature_id and not args.pr_body:
+        parser.error("--feature-id requires --pr-body")
+    if args.pr_body and (not args.feature_id or not re.fullmatch(r"\d{3,}", args.feature_id)):
+        parser.error("--pr-body requires --feature-id with at least three digits")
     root = args.root.resolve()
     package_root = args.package_root.resolve() if args.package_root else None
     # A package-root scan is intentionally runnable from the standalone
     # harness checkout, which has no consumer project's .specify pointer.
     # Keep context/fragment checks when a caller explicitly supplies a
     # separate consumer root or a spec.
-    scan_only = package_root is not None and args.spec is None and root == package_root
+    scan_only = (
+        (package_root is not None and args.spec is None and root == package_root)
+        or (args.pr_body is not None and args.spec is None and package_root is None)
+    )
     errors = [] if scan_only else context(root) + fragments(root)
     if args.spec:
         errors += legacy(args.spec.resolve())
     if args.package_root:
         assert package_root is not None
         errors += package_consistency(package_root) + package_safety(package_root)
+    if args.pr_body:
+        try:
+            body = args.pr_body.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"cannot read PR body: {exc}")
+        else:
+            errors += pr_metadata(body, args.feature_id)
     if errors:
         for error in errors:
             print(f"harness-check: ERROR: {error}", file=sys.stderr)

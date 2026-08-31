@@ -36,6 +36,21 @@ PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'import dev_harness; print(dev_harness.__version__)'
 ```
 
+Для pull request используется trusted workflow
+`.github/workflows/pr-metadata.yml`: он передаёт body как данные в
+`--pr-body` и проверяет Feature ID, issue/task links, exact SHA, lane,
+evidence и Legacy Impact. Локально тот же контракт проверяется так:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --pr-body /path/to/pr-body.md --feature-id 222
+```
+
+Публикация выполняется только через reviewer-approved GitHub Release:
+`release-assets.yml` сверяет tag с `VERSION`, запускает package-safety до
+сборки, прикладывает wheel/sdist, codeload source archive, `SHA256SUMS` и
+`RELEASE-PROVENANCE.json`. Workflow не меняет исходный tag и не публикует
+артефакты без exact source SHA.
+
 Run these commands from the harness repository root. They are intentionally
 dependency-free and are the minimum required check before publishing a
 release. Run the package scan before creating build artifacts; generated

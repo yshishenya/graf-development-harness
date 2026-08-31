@@ -1,6 +1,8 @@
 # Changelog
 
-## [0.1.10] - 2026-08-31
+## [Unreleased]
+
+Ожидает reviewer gate, immutable tag и GitHub Release для `v0.1.10`.
 
 ### Исправлено
 
@@ -9,6 +11,10 @@
 - Schema CI evidence синхронизирована с timestamp contract; стандартный
   `Authorization: Bearer` формат блокируется в metadata-only evidence.
 - Проверка context работает и для consumer-подкаталогов внутри Git worktree.
+- PR metadata теперь проверяется trusted required workflow и тем же локальным CLI.
+- Release workflow публикует codeload source archive, package assets,
+  `SHA256SUMS` и `RELEASE-PROVENANCE.json` только для уже опубликованного
+  reviewer-approved tag.
 
 ### Совместимость
 

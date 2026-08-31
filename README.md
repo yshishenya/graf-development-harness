@@ -96,3 +96,21 @@ syntax, and requires an explicit command/result in PR evidence. Consumers
 should update their pointer and PR template, then run the same self-test and
 package scan against the pinned immutable ref. Rollback is the immutable
 `v0.1.9` ref.
+
+The trusted `pull_request_target` workflow validates PR metadata from the base
+branch, so a fork cannot replace the validator. It requires the canonical
+sections, numeric Feature ID, umbrella issue, Spec task ID, explicit issue
+link, exact source SHA, concrete validation lane, command/result evidence and
+Legacy Impact classification. Run the same check locally with:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --pr-body /path/to/pr-body.md --feature-id 222
+```
+
+The `release-assets.yml` workflow runs only after a reviewer-approved GitHub
+Release is published. It verifies the immutable tag and exact commit, runs the
+package-safety gate before building, downloads the codeload archive addressed
+by that commit, and uploads package files together with `SHA256SUMS` and
+`RELEASE-PROVENANCE.json` as release assets. The provenance record contains
+the repository, exact commit, codeload URL and digest for reproducible
+verification; ordinary PR CI does not generate release assets.
