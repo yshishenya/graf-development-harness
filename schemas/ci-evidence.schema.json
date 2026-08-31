@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:development-process-harness:ci-evidence:v1",
+  "title": "Exact-SHA CI evidence",
+  "description": "Metadata-only proof that one validation run observed one exact source revision.",
+  "type": "object",
+  "required": [
+    "run_id",
+    "lane",
+    "requested_sha",
+    "observed_sha_start",
+    "observed_sha_end",
+    "status",
+    "started_at",
+    "finished_at",
+    "commands",
+    "skipped_gates",
+    "scope",
+    "artifact_digests"
+  ],
+  "properties": {
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]+$"},
+    "lane": {"type": "string", "enum": ["focused", "fast", "full"]},
+    "requested_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "observed_sha_start": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "observed_sha_end": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "status": {"type": "string", "enum": ["passed", "failed", "stale", "cancelled", "ambiguous"]},
+    "reason": {"type": "string", "minLength": 1},
+    "started_at": {"type": "string", "minLength": 1},
+    "finished_at": {"type": "string", "minLength": 1},
+    "commands": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "skipped_gates": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "scope": {"type": "string", "minLength": 1},
+    "artifact_digests": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "pattern": "^(?:sha256:)?[0-9a-fA-F]{64}$"}
+    },
+    "component_shas": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"}
+    },
+    "candidate_id": {"type": "string", "pattern": "^[A-Za-z0-9._:-]+$"},
+    "authoritative_full": {"type": "boolean"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"lane": {"const": "full"}}},
+      "then": {
+        "required": ["candidate_id", "authoritative_full"],
+        "properties": {"authoritative_full": {"const": true}}
+      }
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["failed", "stale", "cancelled", "ambiguous"]}}},
+      "then": {"required": ["reason"]}
+    }
+  ]
+}

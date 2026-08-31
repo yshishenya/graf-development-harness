@@ -1,0 +1,22 @@
+{
+  "run_id": "run-20260831-0001",
+  "lane": "full",
+  "requested_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_sha_start": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observed_sha_end": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "status": "passed",
+  "started_at": "2026-08-31T00:00:00Z",
+  "finished_at": "2026-08-31T00:01:00Z",
+  "commands": ["ci --full"],
+  "skipped_gates": [],
+  "scope": "release candidate",
+  "artifact_digests": {
+    "validation-log": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "component_shas": {
+    "backend": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "frontend": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "candidate_id": "rc-20260831T000000Z-aaaaaaaaaaaa",
+  "authoritative_full": true
+}
