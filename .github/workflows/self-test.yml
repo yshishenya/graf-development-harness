@@ -37,8 +37,11 @@ jobs:
         run: ./bin/harness-check --self-test
 
       - name: Run clean sample smoke-test
-        working-directory: sample
-        run: ../bin/harness-check --spec specs/001-example/spec.md
+        working-directory: .
+        run: |
+          sample_check_dir=$(mktemp -d)
+          git archive HEAD sample | tar -x -C "$sample_check_dir"
+          (cd "$sample_check_dir/sample" && "$GITHUB_WORKSPACE/bin/harness-check" --spec specs/001-example/spec.md)
 
       - name: Scan package before build artifacts exist
         run: ./bin/harness-check --package-root .
