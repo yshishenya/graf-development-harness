@@ -9,6 +9,12 @@
 - JSON schemas и templates для CI receipt и release train.
 - OpenAI-style templates для `GOALS.md`, `PROMPTS.md`, bounded phase/context и
   metadata-only build log.
+- Атомарный allocator Feature ID с блокировкой ledger и проверкой локальных
+  refs/specs перед резервированием.
+- CLI-проверка PR metadata и CI smoke-test для Feature ID, issue/task linkage и
+  exact-SHA evidence.
+- Проверка 32 KiB bounded agent context, дедупликация стабильных правил,
+  канонический `Legacy Impact: Trigger`, `SECURITY.md` и `CODEOWNERS`.
 - Сохранено fail-closed обнаружение bearer credentials из публичного `v0.1.12`.
 
 ### Совместимость

@@ -25,7 +25,7 @@
 
 - Classification: `remove` / `retain-with-exception` / `untouched`
 - Removed or preserved paths:
-- Exception owner/expiry/removal trigger/retirement task (если применимо):
+- Exception owner/expiry/trigger/retirement task (если применимо):
 
 ## Перед merge
 

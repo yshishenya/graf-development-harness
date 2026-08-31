@@ -21,6 +21,8 @@ consumer adapter.
   `AGENTS.override.md` takes precedence over `AGENTS.md` at the same level and
   the closest non-empty file wins. Keep this file short (the default combined
   instruction limit is 32 KiB) and put task-specific rules in scoped docs.
+- Keep layered AGENTS files within the 32 KiB always-on budget and remove
+  duplicated stable rules: `./bin/harness-check --context-check .`.
 
 ## Check
 
@@ -28,6 +30,7 @@ consumer adapter.
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test
 (cd sample && PYTHONDONTWRITEBYTECODE=1 ../bin/harness-check --spec specs/001-example/spec.md)
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
+PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --context-check . --package-root .
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'import dev_harness; print(dev_harness.__version__)'
 ```
 

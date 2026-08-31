@@ -19,6 +19,7 @@ provider and production gates remain in this repository's adapter.
 ## Planned portable contents
 
 - Feature claim and bounded-context schemas/validators.
+- Atomic Feature ID reservation ledger and collision checks across local refs.
 - Changelog fragment and Legacy Impact templates.
 - SHA-bound CI evidence and pull-request metadata validators.
 - Fail-closed event identity and metadata-only CI receipt contracts.
@@ -46,6 +47,7 @@ commands are the source-tree self-check and must work from a clean checkout:
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test
 (cd sample && PYTHONDONTWRITEBYTECODE=1 ../bin/harness-check --spec specs/001-example/spec.md)
 PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --package-root .
+PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --context-check . --package-root .
 ```
 
 The validator API is also available without installing dependencies:
@@ -56,6 +58,33 @@ from dev_harness.validators import ci_evidence, pr_metadata
 assert ci_evidence(evidence) == []
 assert pr_metadata(pull_request_body, "216") == []
 ```
+
+Reserve a Feature ID before creating a branch or Spec Kit feature. Point
+`--feature-id-ledger` at one shared coordinator path when several worktrees
+allocate IDs concurrently; the command takes an OS file lock and atomically
+updates the append-only ledger. It also scans local specs, fragments and Git
+refs, and fails closed on a collision:
+
+```sh
+./bin/harness-check --reserve-feature-id --owner agent-name \
+  --umbrella-issue 6090 --feature-id-ledger /shared/graf/feature-ids.json
+```
+
+The output is the newly reserved ID (for example `Feature ID: F230`). Creating
+the corresponding GitHub umbrella issue is a separate tracker operation; put
+its number in the reservation record and do not treat a local ledger as a
+replacement for GitHub's issue canon.
+
+Validate a PR body in CI with the same dependency-free CLI:
+
+```sh
+./bin/harness-check --pr-body-file "$RUNNER_TEMP/pr-body.md" --feature-id F230
+```
+
+`--context-check` checks the layered `AGENTS.md` / `AGENTS.override.md` files
+against the 32 KiB always-on budget and reports duplicated stable rules. Keep
+phase prompts, specs and build logs outside those files so they are loaded only
+when the current phase needs them.
 
 The portable CI contract API is dependency-free as well:
 

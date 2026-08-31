@@ -5,12 +5,19 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - the published target is Unix-first
+    fcntl = None
 
 
 def context(root: Path) -> list[str]:
@@ -81,6 +88,188 @@ def context(root: Path) -> list[str]:
         if path_item.is_absolute() or ".." in path_item.parts:
             errors.append("owned_paths must be relative")
     return errors
+
+
+_INSTRUCTION_NAMES = {"AGENTS.md", "AGENTS.override.md"}
+_CONTEXT_EXCLUDED_DIRS = {".git", ".venv", "venv", "node_modules", "build", "dist", ".tox"}
+_STABLE_RULE_PREFIXES = (
+    "always ", "before ", "codex ", "do ", "keep ", "must ", "never ",
+    "prefer ", "read ", "require ", "stop ", "use ",
+)
+
+
+def context_budget(root: Path, *, max_bytes: int = 32 * 1024, max_file_bytes: int = 16 * 1024) -> list[str]:
+    """Enforce a bounded, non-duplicated OpenAI-style instruction context.
+
+    The check is intentionally limited to layered AGENTS files.  Templates,
+    specs and historical logs are progressive-disclosure material and must not
+    silently become always-on context.
+    """
+    if max_bytes < 1 or max_file_bytes < 1:
+        return ["context budgets must be positive"]
+    paths: list[Path] = []
+    for base, directories, files in os.walk(root):
+        directories[:] = [name for name in directories if name not in _CONTEXT_EXCLUDED_DIRS]
+        paths.extend(Path(base) / name for name in files if name in _INSTRUCTION_NAMES)
+    paths.sort()
+    errors: list[str] = []
+    total = 0
+    rules: dict[str, Path] = {}
+    for path in paths:
+        try:
+            raw = path.read_bytes()
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"cannot read instruction file {path}: {exc}")
+            continue
+        size = len(raw)
+        total += size
+        if size > max_file_bytes:
+            errors.append(f"instruction file exceeds {max_file_bytes} bytes: {path} ({size})")
+        for line in text.splitlines():
+            normalized = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", line)
+            normalized = re.sub(r"\s+", " ", normalized).strip().lower()
+            if len(normalized) < 24 or normalized.startswith(("#", "```")):
+                continue
+            if not normalized.startswith(_STABLE_RULE_PREFIXES):
+                continue
+            previous = rules.get(normalized)
+            if previous is not None:
+                errors.append(f"duplicated stable instruction between {previous} and {path}: {normalized}")
+            else:
+                rules[normalized] = path
+    if total > max_bytes:
+        errors.append(f"layered AGENTS context exceeds {max_bytes} bytes: {total}")
+    return errors
+
+
+def _feature_number(value: str) -> Optional[str]:
+    match = re.fullmatch(r"F?(\d{3,})", value.strip(), re.IGNORECASE)
+    if not match or int(match.group(1)) < 1:
+        return None
+    return match.group(1)
+
+
+def _feature_ids_in_tree(root: Path) -> set[str]:
+    found: set[str] = set()
+    specs = root / "specs"
+    if specs.is_dir():
+        for path in specs.iterdir():
+            match = re.match(r"^(\d{3,})-", path.name)
+            if match:
+                found.add(match.group(1))
+    fragments_dir = root / "changes" / "unreleased"
+    if fragments_dir.is_dir():
+        for path in fragments_dir.glob("F*.yaml"):
+            number = _feature_number(path.stem)
+            if number:
+                found.add(number)
+    pointer = root / ".specify" / "feature.json"
+    if pointer.is_file():
+        try:
+            data = json.loads(pointer.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("feature_id"), str):
+                number = _feature_number(data["feature_id"])
+                if number:
+                    found.add(number)
+        except (OSError, json.JSONDecodeError):
+            pass
+    try:
+        refs = subprocess.check_output(
+            ["git", "-C", str(root), "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        refs = ""
+    for ref in refs.splitlines():
+        match = re.search(r"(?:^|/)(?:F)?(\d{3,})(?:[-_/]|$)", ref, re.IGNORECASE)
+        if match:
+            found.add(match.group(1))
+    return found
+
+
+def _read_reservation_ledger(path: Path) -> tuple[dict[str, Any], list[str]]:
+    if not path.exists():
+        return {"schema_version": 1, "reservations": []}, []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, [f"invalid feature ID reservation ledger: {exc}"]
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("reservations"), list):
+        return {}, ["feature ID reservation ledger must contain schema_version=1 and reservations array"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, row in enumerate(data["reservations"]):
+        raw_id = row.get("feature_id") if isinstance(row, dict) else None
+        number = _feature_number(raw_id) if isinstance(raw_id, str) else None
+        if number is None or not re.fullmatch(r"\d{3,}", raw_id or ""):
+            errors.append(f"reservation {index} has an invalid feature_id")
+        elif number in seen:
+            errors.append(f"reservation {index} duplicates feature_id {number}")
+        else:
+            seen.add(number)
+    return data, errors
+
+
+@contextmanager
+def _ledger_lock(path: Path):
+    """Serialize reservations across worktrees on Unix filesystems."""
+    if fcntl is None:
+        raise RuntimeError("atomic Feature ID reservation requires a Unix file-lock implementation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def reserve_feature_id(
+    root: Path, *, ledger: Optional[Path] = None, requested: Optional[str] = None,
+    owner: Optional[str] = None, issue: Optional[str] = None, branch: Optional[str] = None,
+) -> str:
+    """Atomically reserve a never-before-used three-digit Feature ID.
+
+    The ledger must live on a filesystem shared by parallel worktrees (for
+    example a coordinator checkout). GitHub issue creation remains a separate
+    adapter concern; callers should record the umbrella issue in the ledger.
+    """
+    if not owner or not owner.strip():
+        raise ValueError("--owner is required for a Feature ID reservation")
+    ledger_path = (ledger or (root / ".specify" / "feature-id-reservations.json")).resolve()
+    with _ledger_lock(ledger_path):
+        data, errors = _read_reservation_ledger(ledger_path)
+        if errors:
+            raise ValueError("; ".join(errors))
+        occupied = _feature_ids_in_tree(root)
+        reservations = data["reservations"]
+        for row in reservations:
+            number = _feature_number(str(row.get("feature_id", "")))
+            if number:
+                occupied.add(number)
+        if requested is not None:
+            number = _feature_number(requested)
+            if number is None:
+                raise ValueError("requested Feature ID must be FNNN or NNN")
+            if number in occupied:
+                raise ValueError(f"Feature ID {number} is already used or reserved")
+        else:
+            next_number = max((int(item) for item in occupied), default=0) + 1
+            number = f"{next_number:03d}"
+        reservations.append({
+            "feature_id": number,
+            "owner": owner.strip(),
+            "issue": issue.strip() if issue else None,
+            "branch": branch.strip() if branch else None,
+            "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        })
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = ledger_path.with_name(ledger_path.name + f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, ledger_path)
+    return number
 
 
 def fragments(root: Path) -> list[str]:
@@ -395,11 +584,14 @@ def pr_metadata(body: Any, feature_id: str) -> list[str]:
     has_result = bool(re.search(r"\b(?:pass(?:ed)?|fail(?:ed)?|not[ -]?run|blocked)\b", verification_section, re.IGNORECASE))
     if not has_command or not has_result:
         errors.append("Как проверено requires command and result evidence")
-    marker = re.search(r"Feature ID:\s*`?F?(\d{3,})", body)
+    expected_feature = _feature_number(feature_id)
+    if expected_feature is None:
+        errors.append("expected feature_id must be FNNN or NNN")
+    marker = re.search(r"Feature ID:\s*`?F?(\d{3,})", body, re.IGNORECASE)
     if not marker:
         errors.append("Feature ID is required in PR body")
-    elif marker.group(1) != str(feature_id):
-        errors.append(f"Feature ID mismatch: expected {feature_id}, got {marker.group(1)}")
+    elif expected_feature is not None and marker.group(1) != expected_feature:
+        errors.append(f"Feature ID mismatch: expected {expected_feature}, got {marker.group(1)}")
     if not re.search(r"Umbrella issue:\s*`?#\d+", body):
         errors.append("umbrella issue is required")
     if not re.search(r"Exact source SHA[^\n]*\b([0-9a-fA-F]{40})\b", body):
@@ -584,6 +776,32 @@ def self_test() -> int:
         documentation = package / "README.md"
         documentation.write_text("api" + '_key = "RealCredential123456"\n', encoding="utf-8")
         assert package_safety(package)
+
+        # Context is bounded and duplicate stable rules are rejected before
+        # they consume the always-on agent prompt budget.
+        (root / "AGENTS.md").write_text("# Rules\n\n- Never commit private data to the repository.\n", encoding="utf-8")
+        assert context_budget(root) == []
+        (root / "nested").mkdir()
+        (root / "nested" / "AGENTS.md").write_text(
+            "# Nested\n\n- Never commit private data to the repository.\n", encoding="utf-8"
+        )
+        assert any("duplicated stable instruction" in error for error in context_budget(root))
+
+        # Reservation is serialized by the ledger lock and never reuses IDs
+        # already present in specs, fragments, refs or earlier reservations.
+        ledger = root / "coordinator" / "feature-ids.json"
+        assert reserve_feature_id(root, ledger=ledger, owner="agent-a") == "002"
+        assert reserve_feature_id(root, ledger=ledger, owner="agent-b") == "003"
+        try:
+            reserve_feature_id(root, ledger=ledger, requested="F002", owner="agent-c")
+        except ValueError as exc:
+            assert "already used" in str(exc)
+        else:
+            raise AssertionError("a duplicate Feature ID reservation must fail")
+
+        pr_body = root / "pr-body.md"
+        pr_body.write_text(good_pr, encoding="utf-8")
+        assert pr_metadata(pr_body.read_text(encoding="utf-8"), "F216") == []
     print("harness-check: self-test OK")
     return 0
 
@@ -594,17 +812,57 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spec", type=Path)
     parser.add_argument("--package-root", type=Path)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--context-check", action="store_true", help="check layered AGENTS context size and duplicate rules")
+    parser.add_argument("--context-budget", type=int, default=32 * 1024)
+    parser.add_argument("--context-file-budget", type=int, default=16 * 1024)
+    parser.add_argument("--pr-body-file", type=Path, help="validate a pull-request body against the metadata contract")
+    parser.add_argument("--feature-id", help="expected Feature ID for --pr-body-file (FNNN or NNN)")
+    parser.add_argument("--reserve-feature-id", action="store_true", help="atomically reserve the next Feature ID")
+    parser.add_argument("--requested-feature-id", help="reserve this exact Feature ID instead of allocating the next one")
+    parser.add_argument("--feature-id-ledger", type=Path, help="shared reservation ledger path")
+    parser.add_argument("--owner", help="human or agent owner recorded in a reservation")
+    parser.add_argument("--umbrella-issue", help="optional umbrella issue recorded in a reservation")
+    parser.add_argument("--branch", help="optional branch recorded in a reservation")
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
     root = args.root.resolve()
     package_root = args.package_root.resolve() if args.package_root else None
+    if args.reserve_feature_id:
+        try:
+            number = reserve_feature_id(
+                root, ledger=args.feature_id_ledger, requested=args.requested_feature_id,
+                owner=args.owner, issue=args.umbrella_issue, branch=args.branch,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"harness-check: ERROR: {exc}", file=sys.stderr)
+            return 1
+        print(f"Feature ID: F{number}")
+        return 0
+    if args.pr_body_file is not None or args.feature_id is not None:
+        if args.pr_body_file is None or args.feature_id is None:
+            print("harness-check: ERROR: --pr-body-file and --feature-id must be provided together", file=sys.stderr)
+            return 1
+        try:
+            body = args.pr_body_file.resolve().read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"harness-check: ERROR: cannot read PR body: {exc}", file=sys.stderr)
+            return 1
+        errors = pr_metadata(body, args.feature_id)
+        if errors:
+            for error in errors:
+                print(f"harness-check: ERROR: {error}", file=sys.stderr)
+            return 1
+        print("harness-check: PR metadata OK")
+        return 0
     # A package-root scan is intentionally runnable from the standalone
     # harness checkout, which has no consumer project's .specify pointer.
     # Keep context/fragment checks when a caller explicitly supplies a
     # separate consumer root or a spec.
     scan_only = package_root is not None and args.spec is None and root == package_root
     errors = [] if scan_only else context(root) + fragments(root)
+    if args.context_check:
+        errors += context_budget(root, max_bytes=args.context_budget, max_file_bytes=args.context_file_budget)
     if args.spec:
         errors += legacy(args.spec.resolve())
     if args.package_root:

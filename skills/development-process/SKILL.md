@@ -14,8 +14,11 @@ metadata or agent governance.
    `.specify/feature.json`; never infer a feature from timestamps or the newest
    directory. Validate the pointer before editing.
 3. Keep one worktree, branch, owner, changelog fragment and evidence namespace
-   per Feature ID. Reserve the ID against local refs and the GitHub tracker
-   before creating a spec.
+   per Feature ID. Reserve the ID before creating a spec, using the portable
+   allocator with a ledger shared by parallel worktrees:
+   `./bin/harness-check --reserve-feature-id --owner <name> --feature-id-ledger
+   <shared-path>`. Record the resulting ID in the GitHub tracker; a local
+   ledger is not a substitute for an umbrella issue.
 4. Use the repository's risk lane and Spec Kit order. For significant work,
    complete specify → clarify → plan → checklist → tasks → analyze →
    taskstoissues → implement → converge → validation.
@@ -37,6 +40,11 @@ metadata or agent governance.
 8. Do not commit, publish, deploy or close tracker items until the consumer's
    required reviewer and approval gates are complete. Preserve metadata-only
    evidence and never write secrets or private user data into it.
+
+The consumer CI should run `--pr-body-file <body> --feature-id <FNNN>` on every
+pull request and `--context-check` on the repository root. This keeps PR
+metadata machine-checkable and prevents stable instructions from growing past
+the default 32 KiB always-on context budget.
 
 ## Context handoff
 
