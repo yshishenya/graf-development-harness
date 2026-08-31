@@ -68,6 +68,11 @@ jobs:
               "schemas/event-identity.schema.json",
               "schemas/release-train.schema.json",
               "templates/release-train.json",
+              "templates/GOALS.md",
+              "templates/PROMPTS.md",
+              "templates/build-phase.md",
+              "templates/phase-context.md",
+              "templates/build-log.md",
               "skills/development-process/SKILL.md",
               "bin/harness-check",
           }
@@ -82,6 +87,11 @@ jobs:
               "development_process_harness-0.1.13.data/data/share/development-process-harness/AGENTS.md",
               "development_process_harness-0.1.13.data/data/share/development-process-harness/schemas/release-train.schema.json",
               "development_process_harness-0.1.13.data/data/share/development-process-harness/templates/release-train.json",
+              "development_process_harness-0.1.13.data/data/share/development-process-harness/templates/GOALS.md",
+              "development_process_harness-0.1.13.data/data/share/development-process-harness/templates/PROMPTS.md",
+              "development_process_harness-0.1.13.data/data/share/development-process-harness/templates/build-phase.md",
+              "development_process_harness-0.1.13.data/data/share/development-process-harness/templates/phase-context.md",
+              "development_process_harness-0.1.13.data/data/share/development-process-harness/templates/build-log.md",
               "development_process_harness-0.1.13.data/data/share/development-process-harness/skills/development-process/SKILL.md",
           }
           assert wheel_expected <= names, sorted(wheel_expected - names)

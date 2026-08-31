@@ -26,6 +26,9 @@ provider and production gates remain in this repository's adapter.
   `schemas/` and `templates/`.
 - Copyable short `AGENTS.md`, feature workflow, Dev adapter, Legacy Impact and
   release-train templates under `templates/`.
+- OpenAI-style `GOALS.md`/`PROMPTS.md` plus bounded phase, context and build-log
+  templates under `templates/`; consumers fill them with project-specific
+  content instead of expanding always-on instructions.
 - Release-candidate contracts and adapter interfaces.
 - Dev manifest adapter interface with lock/atomic-promotion semantics.
 - A bounded `skills/development-process/SKILL.md` for Codex-compatible agents.

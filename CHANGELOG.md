@@ -7,6 +7,8 @@
 - Fail-closed resolver для `pull_request`, `merge_group` и ручного запуска.
 - Metadata-only CI receipt contract с exact-SHA и stale/superseded защитой.
 - JSON schemas и templates для CI receipt и release train.
+- OpenAI-style templates для `GOALS.md`, `PROMPTS.md`, bounded phase/context и
+  metadata-only build log.
 - Сохранено fail-closed обнаружение bearer credentials из публичного `v0.1.12`.
 
 ### Совместимость
