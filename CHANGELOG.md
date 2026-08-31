@@ -1,6 +1,24 @@
 # Changelog
 
-## [Unreleased] — планируется `v0.1.7`
+## [Unreleased] — планируется `v0.1.8`
+
+## [0.1.7] - 2026-08-31
+
+### Исправлено
+
+- Исправлены ссылки на текущий release и rollback в README.
+- В публикацию добавлен GitHub Actions self-test workflow с отменой устаревших запусков.
+- Синхронизированы generic validators, schemas, templates и source-tree launcher.
+
+### Совместимость
+
+- CLI и validator API обратно совместимы с `v0.1.6`.
+- Откат: immutable `v0.1.6`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test, package-safety scan и runtime-version check — PASS.
+- Workflow ограничен `contents: read` и не требует секретов.
 
 ## [0.1.6] - 2026-08-31
 

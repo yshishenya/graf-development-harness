@@ -28,7 +28,7 @@
     "reason": {"type": "string", "minLength": 1},
     "started_at": {"type": "string", "minLength": 1},
     "finished_at": {"type": "string", "minLength": 1},
-    "commands": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "commands": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
     "skipped_gates": {"type": "array", "items": {"type": "string", "minLength": 1}},
     "scope": {"type": "string", "minLength": 1},
     "artifact_digests": {
@@ -48,7 +48,7 @@
     {
       "if": {"properties": {"lane": {"const": "full"}}},
       "then": {
-        "required": ["candidate_id", "authoritative_full"],
+        "required": ["candidate_id", "authoritative_full", "component_shas"],
         "properties": {"authoritative_full": {"const": true}}
       }
     },

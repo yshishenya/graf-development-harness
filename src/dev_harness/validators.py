@@ -57,7 +57,11 @@ def fragments(root: Path) -> list[str]:
         for key in ("schema_version:", "category:", "issue:", "tasks:", "compatibility:", "release_notes:"):
             if key not in text:
                 errors.append(f"{path}: missing {key}")
-        if re.search(r"/Users/|/home/|BEGIN PRIVATE KEY|sk-[A-Za-z0-9]|signed-url|raw audio|transcript text", text, re.I):
+        forbidden_literals = (
+            r"/(?:Users|home)/|"
+            "BEGIN " + r"PRIVATE KEY|sk-[A-Za-z0-9]|signed-url|raw audio|transcript text"
+        )
+        if re.search(forbidden_literals, text, re.I):
             errors.append(f"{path}: forbidden secret/private content")
     return errors
 
@@ -101,9 +105,11 @@ def _sha(data: dict[str, Any], key: str, errors: list[str]) -> Optional[str]:
     return value
 
 
-def _string_list(data: dict[str, Any], key: str, errors: list[str]) -> Optional[list[str]]:
+def _string_list(
+    data: dict[str, Any], key: str, errors: list[str], *, non_empty: bool = False
+) -> Optional[list[str]]:
     value = data.get(key)
-    if not isinstance(value, list) or any(
+    if not isinstance(value, list) or (non_empty and not value) or any(
         not isinstance(item, str) or not item.strip() for item in value
     ):
         errors.append(f"missing or invalid {key}: expected a list of non-empty strings")
@@ -160,12 +166,14 @@ def ci_evidence(data: Any) -> list[str]:
 
     _non_empty_string(data, "started_at", errors)
     _non_empty_string(data, "finished_at", errors)
-    _string_list(data, "commands", errors)
+    _string_list(data, "commands", errors, non_empty=True)
     _string_list(data, "skipped_gates", errors)
     _non_empty_string(data, "scope", errors)
     _artifact_digests(data, errors)
 
     component_shas = data.get("component_shas")
+    if lane == "full" and (not isinstance(component_shas, dict) or not component_shas):
+        errors.append("full evidence requires a non-empty component_shas object")
     if component_shas is not None:
         if not isinstance(component_shas, dict) or not component_shas:
             errors.append("component_shas must be a non-empty object when present")
@@ -264,9 +272,6 @@ def package_safety(package_root: Path) -> list[str]:
             continue
         if path.is_dir() or ".git" in path.parts:
             continue
-        # The scanner's own pattern literals are policy text, not credentials.
-        if relative == Path("src/dev_harness/validators.py"):
-            continue
         if path.suffix in {".pyc", ".pyo"} or ".egg-info" in path.parts or path.name in {".DS_Store"}:
             errors.append(f"generated artifact is not publishable: {relative}")
             continue
@@ -346,6 +351,12 @@ def self_test() -> int:
         )
         assert context(root) == []
         assert legacy(root / "specs/001-example/spec.md") == []
+        package = root / "package"
+        (package / "src/dev_harness").mkdir(parents=True)
+        (package / "src/dev_harness/validators.py").write_text(
+            "pass" + "word = \"" + "x" * 24 + "\"\n", encoding="utf-8"
+        )
+        assert package_safety(package)
     print("harness-check: self-test OK")
     return 0
 

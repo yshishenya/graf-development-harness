@@ -1,0 +1,48 @@
+name: Harness self-test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: harness-self-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  self-test:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run dependency-free self-test
+        run: ./bin/harness-check --self-test
+
+      - name: Run clean sample smoke-test
+        working-directory: sample
+        run: ../bin/harness-check --spec specs/001-example/spec.md
+
+      - name: Scan package before build artifacts exist
+        run: ./bin/harness-check --package-root .
+
+      - name: Verify runtime version
+        run: |
+          test "$(PYTHONPATH=src python -c 'import dev_harness; print(dev_harness.__version__)')" = "$(cat VERSION)"

@@ -15,6 +15,10 @@ consumer adapter.
   validation and leave one runnable self-test for new non-trivial behavior.
 - Consumers pin an immutable release and provide their own adapter for build,
   health, signing and deployment behavior.
+- Codex instruction files are layered global → project → nested directory;
+  `AGENTS.override.md` takes precedence over `AGENTS.md` at the same level and
+  the closest non-empty file wins. Keep this file short (the default combined
+  instruction limit is 32 KiB) and put task-specific rules in scoped docs.
 
 ## Check
 

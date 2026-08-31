@@ -68,11 +68,11 @@ contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.5`;
-`v0.1.4` remains the rollback ref. A consumer must pin the immutable release
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.7`;
+`v0.1.6` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-The next planned release is `v0.1.6`. Until it is cut, keep `VERSION` and the
+The next planned release is `v0.1.8`. Until it is cut, keep `VERSION` and the
 package metadata at the current published version and treat the new files as
 unreleased changes. Publish only after the clean self-check, package scan,
 provenance scan and immutable tag/release procedure pass.

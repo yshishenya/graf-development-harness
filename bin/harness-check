@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 set -eu
-ROOT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
-PYTHONDONTWRITEBYTECODE=1 \
-  PYTHONPATH="$ROOT_DIR/src${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m dev_harness.validators "$@"
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+export PYTHONPATH="$script_dir/../src${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$script_dir/../src/dev_harness/validators.py" "$@"
