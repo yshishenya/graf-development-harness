@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.10] - 2026-08-31
+
+### Исправлено
+
+- Portable context теперь требует branch и source SHA и сверяет их с текущим checkout.
+- CI evidence требует RFC3339 UTC timestamps и корректный порядок времени.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.9`.
+- Откат: immutable `v0.1.9`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test и recursive package-safety/provenance scan — PASS.
+
+### Ограничения
+
+- Product-specific capture, privacy, signing, deployment и data gates остаются adapter-контрактом потребителя.
+
 ## [0.1.9] - 2026-08-31
 
 ### Исправлено

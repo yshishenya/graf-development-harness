@@ -6,6 +6,7 @@ import datetime as dt
 import hashlib
 import json
 import re
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -23,7 +24,10 @@ def context(root: Path) -> list[str]:
     if not isinstance(data, dict):
         return ["invalid feature pointer: expected a JSON object"]
     errors = []
-    for key in ("feature_directory", "feature_id", "owner", "risk_lane", "owned_paths"):
+    for key in (
+        "feature_directory", "feature_id", "branch", "source_sha", "owner",
+        "risk_lane", "owned_paths",
+    ):
         if not data.get(key):
             errors.append(f"missing context field: {key}")
     feature_directory = str(data.get("feature_directory", ""))
@@ -41,6 +45,32 @@ def context(root: Path) -> list[str]:
         else:
             if not candidate.is_dir() or not (candidate / "spec.md").is_file():
                 errors.append("feature_directory and spec.md must exist")
+    branch = data.get("branch")
+    source_sha = data.get("source_sha")
+    if branch and (not isinstance(branch, str) or not branch.strip()):
+        errors.append("branch must be a non-empty string")
+    if source_sha and (not isinstance(source_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", source_sha, re.IGNORECASE)):
+        errors.append("source_sha must be a full 40-character git SHA")
+    # A standalone sample fixture may not have its own .git directory. Real
+    # consumer roots do, and their pointer must describe the checkout actually
+    # being used; no timestamp or newest-directory fallback is permitted.
+    if (root / ".git").exists() and isinstance(branch, str) and branch.strip() and isinstance(source_sha, str) and re.fullmatch(r"[0-9a-f]{40}", source_sha, re.IGNORECASE):
+        try:
+            current_branch = subprocess.check_output(
+                ["git", "-C", str(root), "branch", "--show-current"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+            current_sha = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], text=True, stderr=subprocess.DEVNULL
+            ).strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            errors.append(f"cannot verify current checkout: {exc}")
+        else:
+            if not current_branch:
+                errors.append("checkout must have an active branch")
+            elif current_branch != branch:
+                errors.append(f"branch mismatch: pointer={branch!r}, checkout={current_branch!r}")
+            if current_sha.lower() != source_sha.lower():
+                errors.append("source_sha does not match current HEAD; refresh context before changing files")
     owned_paths = data.get("owned_paths", [])
     if not isinstance(owned_paths, list):
         return errors + ["owned_paths must be a JSON array"]
@@ -124,6 +154,26 @@ _ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CI_LANES = {"focused", "fast", "full"}
 _CI_STATUSES = {"passed", "failed", "stale", "cancelled", "ambiguous"}
 _STALE_CI_STATUSES = {"failed", "stale", "cancelled", "ambiguous"}
+_UTC_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]00:00)$"
+)
+
+
+def _utc_timestamp(data: dict[str, Any], key: str, errors: list[str]) -> Optional[dt.datetime]:
+    value = _non_empty_string(data, key, errors)
+    if value is None or not _UTC_TIMESTAMP_RE.fullmatch(value):
+        if value is not None:
+            errors.append(f"{key} must be an RFC3339 UTC timestamp")
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        errors.append(f"{key} must be an RFC3339 UTC timestamp")
+        return None
+    if parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+        errors.append(f"{key} must be an RFC3339 UTC timestamp")
+        return None
+    return parsed
 
 
 def _non_empty_string(data: dict[str, Any], key: str, errors: list[str]) -> Optional[str]:
@@ -224,8 +274,10 @@ def ci_evidence(data: Any) -> list[str]:
     if status != "passed":
         _non_empty_string(data, "reason", errors)
 
-    _non_empty_string(data, "started_at", errors)
-    _non_empty_string(data, "finished_at", errors)
+    started_at = _utc_timestamp(data, "started_at", errors)
+    finished_at = _utc_timestamp(data, "finished_at", errors)
+    if started_at is not None and finished_at is not None and finished_at <= started_at:
+        errors.append("finished_at must be after started_at")
     _string_list(data, "commands", errors, non_empty=True)
     skipped_gates = _string_list(data, "skipped_gates", errors)
     _non_empty_string(data, "scope", errors)
@@ -277,7 +329,30 @@ def pr_metadata(body: Any, feature_id: str) -> list[str]:
     """Validate the machine-checkable metadata contract in a pull request."""
     if not isinstance(body, str):
         return ["PR body must be a string"]
-    errors = [f"missing PR section: {section}" for section in _PR_REQUIRED_SECTIONS if section not in body]
+    errors: list[str] = []
+    sections: dict[str, str] = {}
+    for heading in _PR_REQUIRED_SECTIONS:
+        match = re.search(
+            rf"^\s*{re.escape(heading)}\s*$([\s\S]*?)(?=^\s*##\s|\Z)",
+            body,
+            re.MULTILINE,
+        )
+        if not match:
+            errors.append(f"missing PR section: {heading}")
+        else:
+            section = match.group(1).strip()
+            sections[heading] = section
+            if not section:
+                errors.append(f"empty PR section: {heading}")
+    lane_section = sections.get("## Risk / validation lane", "")
+    lane = re.search(r"(?im)^\s*[-*]?\s*Lane\s*:\s*`?([A-Za-z][A-Za-z0-9_-]*)`?\s*$", lane_section)
+    if not lane or lane.group(1).lower() in {"tbd", "todo", "unknown", "placeholder"}:
+        errors.append("Risk / validation lane requires a concrete Lane")
+    verification_section = sections.get("## Как проверено", "")
+    has_command = bool(re.search(r"`[^`\n]+`", verification_section))
+    has_result = bool(re.search(r"\b(?:pass(?:ed)?|fail(?:ed)?|not[ -]?run|blocked)\b", verification_section, re.IGNORECASE))
+    if not has_command or not has_result:
+        errors.append("Как проверено requires command and result evidence")
     marker = re.search(r"Feature ID:\s*`?F?(\d{3,})", body)
     if not marker:
         errors.append("Feature ID is required in PR body")
@@ -380,17 +455,22 @@ def self_test() -> int:
     failed_evidence = dict(good_evidence, status="ambiguous", reason="runner interrupted")
     assert any("cannot be release" in error for error in ci_evidence(failed_evidence))
 
-    good_pr = "\n".join(_PR_REQUIRED_SECTIONS) + (
-        "\nFeature ID: `F216`\n"
-        "Umbrella issue: `#6090`\n"
-        "Spec task IDs: `T042`\n"
-        "Exact source SHA: " + sha + "\n"
-        "Refs #6090\n"
-        "Classification: `untouched`\n"
+    good_pr = (
+        "## Feature identity\nFeature ID: `F216`\nUmbrella issue: `#6090`\nSpec task IDs: `T042`\n"
+        "\n## Как проверено\n- `ci --fast`: passed\n- Exact source SHA: " + sha + "\n"
+        "\n## Risk / validation lane\n- Lane: significant-feature\n"
+        "\n## Issues\n- Refs #6090\n"
+        "\n## Legacy Impact\n- Classification: `untouched`\n"
+        "\n## Перед merge\n- evidence recorded\n"
     )
     assert pr_metadata(good_pr, "216") == []
     assert any("Feature ID mismatch" in error for error in pr_metadata(good_pr.replace("F216", "F215"), "216"))
     assert any("missing PR section" in error for error in pr_metadata(good_pr.replace("## Issues", "## Links"), "216"))
+    empty_quality = good_pr.replace("## Как проверено\n- `ci --fast`: passed", "## Как проверено\n").replace(
+        "## Risk / validation lane\n- Lane: significant-feature", "## Risk / validation lane\n- Lane: TBD"
+    )
+    assert any("command and result evidence" in error for error in pr_metadata(empty_quality, "216"))
+    assert any("concrete Lane" in error for error in pr_metadata(empty_quality, "216"))
 
     with tempfile.TemporaryDirectory(prefix="development-harness-") as directory:
         root = Path(directory)
@@ -404,6 +484,8 @@ def self_test() -> int:
                 {
                     "feature_directory": "specs/001-example",
                     "feature_id": "001",
+                    "branch": "test/001-example",
+                    "source_sha": "a" * 40,
                     "owner": "test",
                     "risk_lane": "low",
                     "owned_paths": ["specs/001-example"],
