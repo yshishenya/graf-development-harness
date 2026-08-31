@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.11] - 2026-08-31
+
+### Исправлено
+
+- Runtime `__version__` синхронизирован с `VERSION` и `pyproject.toml`.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.10`.
+- Откат: immutable `v0.1.10`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test, package-safety scan и runtime-version check — PASS.
+
 ## [0.1.10] - 2026-08-31
 
 ### Добавлено

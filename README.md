@@ -71,11 +71,13 @@ contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.10`;
-`v0.1.9` remains the rollback ref. A consumer must pin the immutable release
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.11`;
+`v0.1.10` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-Migration from `v0.1.9` to `v0.1.10` adds the portable feature-context schema
-and copyable bounded-context, Dev-adapter, Legacy Impact and release-train
-templates. Consumers should run the same self-test and package scan after
-updating their pinned ref. Rollback is the immutable `v0.1.9` ref.
+Migration from `v0.1.10` to `v0.1.11` fixes the runtime package-version
+declaration so clean installs report the same version as `VERSION` and
+`pyproject.toml`. The portable feature-context schema and copyable templates
+were introduced in `v0.1.10`. Consumers should run the same self-test and
+package scan after updating their pinned ref. Rollback is the immutable
+`v0.1.10` ref.
