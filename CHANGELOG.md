@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.10] - 2026-08-31
+
+### Добавлено
+
+- Добавлена portable schema для per-worktree Feature context.
+- Добавлены copyable templates для короткого `AGENTS.md`, feature workflow,
+  Dev adapter, Legacy Impact и release train.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.9`.
+- Откат: immutable `v0.1.9`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test и recursive package-safety/provenance scan — PASS.
+
 ## [0.1.9] - 2026-08-31
 
 ### Исправлено

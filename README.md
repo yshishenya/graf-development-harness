@@ -23,6 +23,8 @@ provider and production gates remain in this repository's adapter.
 - SHA-bound CI evidence and pull-request metadata validators.
 - Generic JSON schemas and copyable CI evidence / pull-request templates under
   `schemas/` and `templates/`.
+- Copyable short `AGENTS.md`, feature workflow, Dev adapter, Legacy Impact and
+  release-train templates under `templates/`.
 - Release-candidate contracts and adapter interfaces.
 - Dev manifest adapter interface with lock/atomic-promotion semantics.
 - A bounded `skills/development-process/SKILL.md` for Codex-compatible agents.
@@ -69,12 +71,11 @@ contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.9`;
-`v0.1.8` remains the rollback ref. A consumer must pin the immutable release
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.10`;
+`v0.1.9` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-Migration from `v0.1.8` to `v0.1.9` adds ISO/future expiry validation for
-legacy exceptions and scans documentation for credential assignments while
-still allowing field-name examples. Consumers should run the same self-test
-and package scan after updating their pinned ref. Rollback is the immutable
-`v0.1.8` ref.
+Migration from `v0.1.9` to `v0.1.10` adds the portable feature-context schema
+and copyable bounded-context, Dev-adapter, Legacy Impact and release-train
+templates. Consumers should run the same self-test and package scan after
+updating their pinned ref. Rollback is the immutable `v0.1.9` ref.
