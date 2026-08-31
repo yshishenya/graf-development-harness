@@ -155,7 +155,7 @@ _CI_LANES = {"focused", "fast", "full"}
 _CI_STATUSES = {"passed", "failed", "stale", "cancelled", "ambiguous"}
 _STALE_CI_STATUSES = {"failed", "stale", "cancelled", "ambiguous"}
 _UTC_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]00:00)$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$"
 )
 
 
@@ -454,6 +454,12 @@ def self_test() -> int:
     assert any("mismatch" in error for error in ci_evidence(stale_evidence))
     failed_evidence = dict(good_evidence, status="ambiguous", reason="runner interrupted")
     assert any("cannot be release" in error for error in ci_evidence(failed_evidence))
+    assert any("RFC3339 UTC timestamp" in error for error in ci_evidence(
+        dict(good_evidence, started_at="2026-08-31T00:00:00-00:00")
+    ))
+    assert any("RFC3339 UTC timestamp" in error for error in ci_evidence(
+        dict(good_evidence, started_at="2026-08-31T00:00:00.1234567Z")
+    ))
 
     good_pr = (
         "## Feature identity\nFeature ID: `F216`\nUmbrella issue: `#6090`\nSpec task IDs: `T042`\n"
