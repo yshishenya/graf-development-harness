@@ -85,7 +85,11 @@ the immutable release and update its migration notes and rollback ref together.
 
 Migration from `v0.1.9` to `v0.1.10` requires existing `.specify/feature.json`
 files to add the active `branch` and full 40-character `source_sha` fields;
-the values must match the checkout used by the consumer. It also makes CI
+the values must match the checkout used by the consumer. From the consumer
+root, run `git branch --show-current` and `git rev-parse HEAD`, write those two
+values into the pointer, then run `harness-check` before changing files. A
+pointer missing either field is intentionally rejected; this explicit
+migration keeps stale context fail-closed. It also makes CI
 evidence timestamps strict RFC3339 UTC (with at most six fractional digits),
 rejects unknown `-00:00` offsets and standard `Authorization: Bearer` token
 syntax, and requires an explicit command/result in PR evidence. Consumers

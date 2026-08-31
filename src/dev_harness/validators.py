@@ -169,6 +169,8 @@ _CI_LANES = {"focused", "fast", "full"}
 _CI_STATUSES = {"passed", "failed", "stale", "cancelled", "ambiguous"}
 _STALE_CI_STATUSES = {"failed", "stale", "cancelled", "ambiguous"}
 _UTC_TIMESTAMP_RE = re.compile(
+    # RFC3339 UTC only: keep Python 3.9 chronology lossless and exclude the
+    # RFC3339 unknown-offset marker (-00:00).
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$"
 )
 _CI_ALLOWED_FIELDS = {
@@ -566,6 +568,25 @@ def self_test() -> int:
         )
         assert context(root) == []
         assert legacy(root / "specs/001-example/spec.md") == []
+        legacy_pointer = json.loads((root / ".specify/feature.json").read_text(encoding="utf-8"))
+        legacy_pointer.pop("branch")
+        legacy_pointer.pop("source_sha")
+        (root / ".specify/feature.json").write_text(json.dumps(legacy_pointer), encoding="utf-8")
+        migration_errors = context(root)
+        assert any("missing context field: branch" in error for error in migration_errors)
+        assert any("missing context field: source_sha" in error for error in migration_errors)
+        legacy_pointer["branch"] = "test/001-example"
+        legacy_pointer["source_sha"] = "a" * 40
+        (root / ".specify/feature.json").write_text(json.dumps(legacy_pointer), encoding="utf-8")
+        assert context(root) == []
+
+        schema_path = Path(__file__).resolve().parents[2] / "schemas" / "ci-evidence.schema.json"
+        if schema_path.is_file():
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            schema_timestamp = re.compile(schema["properties"]["started_at"]["pattern"])
+            assert schema_timestamp.fullmatch("2026-08-31T00:00:00.123456Z")
+            assert not schema_timestamp.fullmatch("2026-08-31T00:00:00.1234567Z")
+            assert not schema_timestamp.fullmatch("2026-08-31T00:00:00-00:00")
 
         nested_repo = root / "nested-consumer"
         nested_project = nested_repo / "app"

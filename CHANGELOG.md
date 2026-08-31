@@ -13,7 +13,8 @@
 ### Совместимость
 
 - Python 3.9+; CLI и validator API сохраняют API, но существующие feature
-  pointers требуют миграции с `v0.1.9` (см. README.md).
+  pointers требуют явной миграции с `v0.1.9`: записать active branch и
+  текущий full source SHA перед запуском checker (см. README.md).
 - Откат: immutable `v0.1.9`.
 
 ### Проверки
