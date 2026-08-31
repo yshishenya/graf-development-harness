@@ -55,6 +55,11 @@ def context(root: Path) -> list[str]:
     # consumer nested in a monorepo, ``git -C`` still resolves the enclosing
     # worktree even when ``root/.git`` is absent; no timestamp or
     # newest-directory fallback is permitted.
+    resolved_root = root.resolve()
+    has_enclosing_git_marker = any(
+        (directory / ".git").exists()
+        for directory in (resolved_root, *resolved_root.parents)
+    )
     in_git_worktree = False
     try:
         subprocess.check_output(
@@ -62,8 +67,9 @@ def context(root: Path) -> list[str]:
             text=True,
             stderr=subprocess.DEVNULL,
         )
-    except (OSError, subprocess.CalledProcessError):
-        pass
+    except (OSError, subprocess.CalledProcessError) as exc:
+        if has_enclosing_git_marker:
+            errors.append(f"cannot verify current checkout: {exc}")
     else:
         in_git_worktree = True
     if in_git_worktree and isinstance(branch, str) and branch.strip() and isinstance(source_sha, str) and re.fullmatch(r"[0-9a-f]{40}", source_sha, re.IGNORECASE):
@@ -406,7 +412,7 @@ def pr_metadata(body: Any, feature_id: str) -> list[str]:
     verification_section = sections.get("## Как проверено", "")
     command_spans = re.findall(r"`[^`\n]+`", verification_section)
     has_command = bool(command_spans)
-    result_text = re.sub(r"`[^`\n]+`", "", verification_section)
+    result_text = re.sub(r"(?s)```.*?```|`[^`\n]+`", "", verification_section)
     has_result = bool(re.search(r"\b(?:pass(?:ed)?|fail(?:ed)?|not[ -]?run|blocked)\b", result_text, re.IGNORECASE))
     if not has_command or not has_result:
         errors.append("Как проверено requires command and result evidence")
@@ -544,6 +550,10 @@ def self_test() -> int:
     assert any("concrete Lane" in error for error in pr_metadata(empty_quality, "216"))
     command_without_result = good_pr.replace("- `ci --fast`: passed", "- `pytest --failed-first`")
     assert any("command and result evidence" in error for error in pr_metadata(command_without_result, "216"))
+    fenced_command_without_result = good_pr.replace(
+        "- `ci --fast`: passed", "- `pytest`\n```sh\npytest --last-failed\n```"
+    )
+    assert any("command and result evidence" in error for error in pr_metadata(fenced_command_without_result, "216"))
 
     with tempfile.TemporaryDirectory(prefix="development-harness-") as directory:
         root = Path(directory)
@@ -579,6 +589,19 @@ def self_test() -> int:
         legacy_pointer["source_sha"] = "a" * 40
         (root / ".specify/feature.json").write_text(json.dumps(legacy_pointer), encoding="utf-8")
         assert context(root) == []
+
+        broken_git_root = root / "broken-consumer"
+        broken_git_root.mkdir()
+        (broken_git_root / ".git").write_text("not a git directory\n", encoding="utf-8")
+        (broken_git_root / ".specify").mkdir(parents=True)
+        (broken_git_root / "specs/001-example").mkdir(parents=True)
+        (broken_git_root / "specs/001-example/spec.md").write_text(
+            "# Example\n\n## Legacy Impact\n\nClassification: untouched\n", encoding="utf-8"
+        )
+        (broken_git_root / ".specify/feature.json").write_text(
+            json.dumps(legacy_pointer), encoding="utf-8"
+        )
+        assert any("cannot verify current checkout" in error for error in context(broken_git_root))
 
         schema_path = Path(__file__).resolve().parents[2] / "schemas" / "ci-evidence.schema.json"
         if schema_path.is_file():
