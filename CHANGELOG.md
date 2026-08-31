@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.1.13] - 2026-09-01 (unreleased)
+
+### Добавлено
+
+- Fail-closed resolver для `pull_request`, `merge_group` и ручного запуска.
+- Metadata-only CI receipt contract с exact-SHA и stale/superseded защитой.
+- JSON schemas и templates для CI receipt и release train.
+- Сохранено fail-closed обнаружение bearer credentials из публичного `v0.1.12`.
+
+### Совместимость
+
+- Python 3.9+; существующий CLI и validator API сохраняются.
+- Откат: immutable `v0.1.12`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test и package-safety scan — PASS.
+- Сборка wheel/sdist и проверка содержимого артефактов — PASS.
+- Публикация и immutable tag отложены до owner approval и remote rehearsal.
+
 ## [0.1.12] - 2026-09-01
 
 ### Исправлено

@@ -24,7 +24,10 @@ metadata or agent governance.
    stale, interrupted or skipped-gate evidence cannot authorize release.
    The exact-SHA gate requires a clean worktree. A dirty diagnostic must be
    explicitly opted into and recorded as `ambiguous`; it never authorizes
-   merge or release.
+   merge or release. For a release train, require a synthetic merge SHA, link
+   the candidate with `--train`, attest the single Full CI receipt with
+   `train-attest`, and pass only the resulting `*-go.json` train to
+   `decide --train`.
 6. Test a selected SHA in the consumer's single Dev target with a lock,
    atomic manifest, smoke checks and reversible promotion. Keep production
    origins, credentials and data outside the Dev adapter.

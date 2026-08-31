@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:development-process-harness:release-train:v1",
+  "title": "Frozen release train",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "train_id", "source_sha", "base_sha", "synthetic_merge_sha", "included_prs", "feature_ids", "merge_group_ids", "pr_receipts", "merge_group_receipts", "changelog_digest", "authoritative_full_ci_receipt", "decision", "rollback_target"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "train_id": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$"},
+    "source_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-fA-F]{40}$"},
+    "synthetic_merge_sha": {"type": ["string", "null"], "pattern": "^[0-9a-fA-F]{40}$"},
+    "included_prs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
+    "feature_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:F)?[0-9]{3,}$"}},
+    "merge_group_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,256}$"}},
+    "pr_receipts": {"type": "array", "items": {"$ref": "ci-receipt.schema.json"}},
+    "merge_group_receipts": {"type": "array", "items": {"$ref": "ci-receipt.schema.json"}},
+    "changelog_digest": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"},
+    "authoritative_full_ci_receipt": {"oneOf": [{"$ref": "ci-receipt.schema.json"}, {"type": "null"}]},
+    "decision": {"type": "string", "enum": ["pending", "approved", "rejected", "blocked"]},
+    "rollback_target": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$"}
+  }
+}

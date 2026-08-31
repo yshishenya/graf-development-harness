@@ -445,7 +445,7 @@ def package_safety(package_root: Path) -> list[str]:
         re.IGNORECASE,
     )
     credential_assignment = re.compile(
-        r"\b(?:api[_-]?key|secret|password|bearer)\s*[:=]\s*['\"]?"
+        r"\b(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url|bearer)\s*[:=]\s*['\"]?"
         r"[A-Za-z0-9][A-Za-z0-9_./+=:-]{7,}",
         re.IGNORECASE,
     )
@@ -474,6 +474,9 @@ def package_safety(package_root: Path) -> list[str]:
 
 
 def self_test() -> int:
+    from dev_harness.ci_contracts import self_test as ci_contracts_self_test
+
+    ci_contracts_self_test()
     sha = "a" * 40
     digest = "sha256:" + "b" * 64
     good_evidence = {

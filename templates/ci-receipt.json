@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "event_name": "pull_request",
+  "workflow": "governance",
+  "run_id": "run-0001",
+  "run_attempt": 1,
+  "workflow_url": "https://github.com/example/project/actions/runs/1",
+  "target_sha": "0000000000000000000000000000000000000000",
+  "base_sha": "1111111111111111111111111111111111111111",
+  "pull_request_numbers": [1],
+  "merge_group_id": null,
+  "requested_sha": "0000000000000000000000000000000000000000",
+  "observed_sha_start": "0000000000000000000000000000000000000000",
+  "observed_sha_end": "0000000000000000000000000000000000000000",
+  "final_cleanliness": "pass",
+  "local_evidence_digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "started_at": "2026-01-01T00:00:00Z",
+  "finished_at": "2026-01-01T00:01:00Z",
+  "concurrency_key": "pr-1",
+  "cancellation_state": "none",
+  "supersession_state": "none"
+}

@@ -21,6 +21,7 @@ provider and production gates remain in this repository's adapter.
 - Feature claim and bounded-context schemas/validators.
 - Changelog fragment and Legacy Impact templates.
 - SHA-bound CI evidence and pull-request metadata validators.
+- Fail-closed event identity and metadata-only CI receipt contracts.
 - Generic JSON schemas and copyable CI evidence / pull-request templates under
   `schemas/` and `templates/`.
 - Copyable short `AGENTS.md`, feature workflow, Dev adapter, Legacy Impact and
@@ -53,6 +54,16 @@ assert ci_evidence(evidence) == []
 assert pr_metadata(pull_request_body, "216") == []
 ```
 
+The portable CI contract API is dependency-free as well:
+
+```python
+from dev_harness.ci_contracts import ci_receipt, release_train, resolve_event_identity
+
+identity = resolve_event_identity(event_payload, "merge_group")
+assert ci_receipt(receipt_payload) == []
+assert release_train(train_payload) == []
+```
+
 `ci_evidence()` enforces exact-SHA evidence, non-ambiguous status, required
 commands/digests and authoritative full-run metadata. `pr_metadata()` enforces
 the feature ID, umbrella issue, task ID, SHA, issue linkage, Legacy Impact and
@@ -62,8 +73,10 @@ express.
 
 The package scan is intentionally run before building or installing the
 package: generated `build/`, `*.egg-info/` and bytecode files are not
-publishable. A consumer may run the same checks from its CI after extracting
-this directory as the repository root.
+publishable. The wheel installs schemas, templates and the bounded skill under
+`share/development-process-harness/`; the source distribution also includes
+the sample and launcher. A consumer may run the same checks from its CI after
+extracting this directory as the repository root.
 
 Project adapters may add real build, health, signing and deployment probes, but
 must preserve the exact-SHA, loopback-only, one-active-target and fail-closed
@@ -75,10 +88,15 @@ The current public release is pinned at
 `v0.1.11` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-Migration from `v0.1.11` to `v0.1.12` makes CI-evidence credential detection
-fail closed for every bearer token, including short tokens and the common
-`Authorization: Bearer ...` form. Migration from `v0.1.10` to `v0.1.11`
-fixed the runtime package-version declaration. The portable feature-context
-schema and copyable templates were introduced in `v0.1.10`. Consumers should
-run the same self-test and package scan after updating their pinned ref.
-Rollback is the immutable `v0.1.11` ref.
+The unreleased `0.1.13` candidate adds the generic event-identity, CI-receipt
+and release-train contracts. It is not a public immutable ref until its tag,
+checksum, release notes and rollback evidence are published.
+
+Migration from `v0.1.11` to `v0.1.12` hardens bearer credential detection,
+including short and `Authorization: Bearer ...` forms. Migration from
+`v0.1.10` to `v0.1.11` fixes the runtime package-version
+declaration so clean installs report the same version as `VERSION` and
+`pyproject.toml`. The portable feature-context schema and copyable templates
+were introduced in `v0.1.10`. Consumers should run the same self-test and
+package scan after updating their pinned ref. Rollback is the immutable
+`v0.1.11` ref.
