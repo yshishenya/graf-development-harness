@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -24,8 +25,21 @@ def context(root: Path) -> list[str]:
     for key in ("feature_directory", "feature_id", "owner", "risk_lane", "owned_paths"):
         if not data.get(key):
             errors.append(f"missing context field: {key}")
-    if not re.fullmatch(r"specs/\d{3,}-[a-z0-9][a-z0-9-]*", str(data.get("feature_directory", ""))):
+    feature_directory = str(data.get("feature_directory", ""))
+    directory_match = re.fullmatch(r"specs/(\d{3,})-[a-z0-9][a-z0-9-]*", feature_directory)
+    if not directory_match:
         errors.append("feature_directory must be specs/NNN-slug")
+    else:
+        if str(data.get("feature_id", "")) != directory_match.group(1):
+            errors.append("feature_id must match feature_directory")
+        candidate = (root / feature_directory).resolve()
+        try:
+            candidate.relative_to(root.resolve())
+        except ValueError:
+            errors.append("feature_directory must remain inside the consumer root")
+        else:
+            if not candidate.is_dir() or not (candidate / "spec.md").is_file():
+                errors.append("feature_directory and spec.md must exist")
     owned_paths = data.get("owned_paths", [])
     if not isinstance(owned_paths, list):
         return errors + ["owned_paths must be a JSON array"]
@@ -52,10 +66,10 @@ def fragments(root: Path) -> list[str]:
         seen.add(feature)
         if path.stem != f"F{feature}":
             errors.append(f"{path}: filename must match feature_id")
-        if not re.search(r"^summary:\s*.+[А-Яа-яЁё]", text, re.MULTILINE):
-            errors.append(f"{path}: summary must be non-empty and Russian")
+        if not re.search(r"^summary:\s*\S", text, re.MULTILINE):
+            errors.append(f"{path}: summary must be non-empty")
         for key in ("schema_version:", "category:", "issue:", "tasks:", "compatibility:", "release_notes:"):
-            if key not in text:
+            if not re.search(r"^" + re.escape(key), text, re.MULTILINE):
                 errors.append(f"{path}: missing {key}")
         forbidden_literals = (
             r"/(?:Users|home)/|"
@@ -71,13 +85,25 @@ def legacy(spec: Path) -> list[str]:
         text = spec.read_text(encoding="utf-8")
     except OSError as exc:
         return [str(exc)]
-    match = re.search(r"^## Legacy Impact\s*$([\s\S]*)", text, re.MULTILINE)
+    match = re.search(r"^## Legacy Impact\s*$([\s\S]*?)(?=^## |\Z)", text, re.MULTILINE)
     if not match:
         return [f"{spec}: missing Legacy Impact"]
     section = match.group(1)
-    if not re.search(r"\b(remove|retain-with-exception|untouched)\b", section):
+    classifications = re.findall(
+        r"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?classification(?:\*\*)?[ \t]*:[ \t]*[`']?(remove|retain-with-exception|untouched)[`']?(?:[ \t]*;[ \t]*.*)?$",
+        section,
+        re.IGNORECASE | re.MULTILINE,
+    )
+    if len(classifications) != 1:
         return [f"{spec}: Legacy Impact classification is invalid"]
-    if "retain-with-exception" in section and any(token not in section.lower() for token in ("owner", "expiry", "trigger", "retirement task")):
+    if classifications[0].lower() == "retain-with-exception" and any(
+        not re.search(
+            rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(token)}(?:\*\*)?[ \t]*:[ \t]*\S",
+            section,
+            re.IGNORECASE | re.MULTILINE,
+        )
+        for token in ("owner", "expiry", "trigger", "retirement task")
+    ):
         return [f"{spec}: compatibility exception needs owner, expiry, trigger and retirement task"]
     return []
 
@@ -85,6 +111,7 @@ def legacy(spec: Path) -> list[str]:
 _SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 _DIGEST_RE = re.compile(r"^(?:sha256:)?[0-9a-fA-F]{64}$")
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
+_ARTIFACT_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 _CI_LANES = {"focused", "fast", "full"}
 _CI_STATUSES = {"passed", "failed", "stale", "cancelled", "ambiguous"}
 _STALE_CI_STATUSES = {"failed", "stale", "cancelled", "ambiguous"}
@@ -123,10 +150,34 @@ def _artifact_digests(data: dict[str, Any], errors: list[str]) -> None:
         errors.append("missing or invalid artifact_digests: expected a non-empty object")
         return
     for name, digest in value.items():
-        if not isinstance(name, str) or not name.strip():
+        if not isinstance(name, str) or not _ARTIFACT_NAME_RE.fullmatch(name):
             errors.append("artifact_digests contains an invalid artifact name")
         elif not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
             errors.append(f"invalid artifact digest for {name!r}")
+
+
+def _source_revision_identity(
+    data: dict[str, Any], observed_end: Optional[str], errors: list[str]
+) -> None:
+    """Bind the optional source-revision digest to the observed SHA.
+
+    ``source-revision`` is an identity assertion, not an artifact digest.  If
+    a producer emits it, accepting a value for a different revision would
+    make otherwise stale evidence look current.  Actual release artifacts
+    remain producer-specific and may be represented by additional entries.
+    """
+    digests = data.get("artifact_digests")
+    if not isinstance(digests, dict) or "source-revision" not in digests or not observed_end:
+        return
+    digest = digests["source-revision"]
+    if not isinstance(digest, str) or not _DIGEST_RE.fullmatch(digest):
+        return
+    if not _SHA_RE.fullmatch(observed_end):
+        return
+    expected = "sha256:" + hashlib.sha256(observed_end.encode("ascii")).hexdigest()
+    normalized = digest if digest.lower().startswith("sha256:") else "sha256:" + digest
+    if normalized.lower() != expected:
+        errors.append("source-revision artifact digest does not match observed end SHA")
 
 
 def ci_evidence(data: Any) -> list[str]:
@@ -167,9 +218,10 @@ def ci_evidence(data: Any) -> list[str]:
     _non_empty_string(data, "started_at", errors)
     _non_empty_string(data, "finished_at", errors)
     _string_list(data, "commands", errors, non_empty=True)
-    _string_list(data, "skipped_gates", errors)
+    skipped_gates = _string_list(data, "skipped_gates", errors)
     _non_empty_string(data, "scope", errors)
     _artifact_digests(data, errors)
+    _source_revision_identity(data, observed_end, errors)
 
     component_shas = data.get("component_shas")
     if lane == "full" and (not isinstance(component_shas, dict) or not component_shas):
@@ -192,6 +244,10 @@ def ci_evidence(data: Any) -> list[str]:
             errors.append("invalid candidate_id")
         if data.get("authoritative_full") is not True:
             errors.append("full evidence requires authoritative_full=true")
+        if skipped_gates == []:
+            pass
+        elif skipped_gates is not None:
+            errors.append("authoritative full evidence cannot skip gates")
 
     if "authoritative_full" in data and not isinstance(data["authoritative_full"], bool):
         errors.append("authoritative_full must be boolean")
@@ -350,6 +406,11 @@ def self_test() -> int:
             encoding="utf-8",
         )
         assert context(root) == []
+        assert legacy(root / "specs/001-example/spec.md") == []
+        (root / "specs/001-example/spec.md").write_text(
+            "# Example\n\n## Legacy Impact\n\n- Classification: `untouched`; no legacy surface is changed.\n",
+            encoding="utf-8",
+        )
         assert legacy(root / "specs/001-example/spec.md") == []
         package = root / "package"
         (package / "src/dev_harness").mkdir(parents=True)

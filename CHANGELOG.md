@@ -1,6 +1,30 @@
 # Changelog
 
-## [Unreleased] — планируется `v0.1.8`
+## [0.1.8] - 2026-08-31
+
+### Исправлено
+
+- Усилена проверка portable context: feature directory, `spec.md`, numeric ID и symlink containment.
+- Уточнена проверка Legacy Impact и поддержан безопасный комментарий после classification.
+- Artifact identities ограничены безопасным форматом; `source-revision` связывается с observed SHA.
+- Добавлен bounded Codex skill для progressive disclosure и bounded context.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.7`.
+- Откат: immutable `v0.1.7`.
+
+### Проверки
+
+- `PYTHONDONTWRITEBYTECODE=1 ./bin/harness-check --self-test` — PASS.
+- Clean sample smoke-test и recursive package-safety/provenance scan — PASS.
+- Публикация выполнена из чистого exact commit.
+
+### Ограничения
+
+- Product-specific capture, privacy, signing, deployment и data gates остаются adapter-контрактом потребителя.
+
+## [Unreleased]
 
 ## [0.1.7] - 2026-08-31
 
@@ -20,19 +44,23 @@
 - Self-test, clean sample smoke-test, package-safety scan и runtime-version check — PASS.
 - Workflow ограничен `contents: read` и не требует секретов.
 
+### Безопасность и контекст
+
+- Package-safety scan теперь проверяет и собственный validator source, не
+  оставляя исключений для credential assignments.
+- Portable `AGENTS.md` явно описывает официальный порядок наследования
+  инструкций Codex и default context limit.
+
 ## [0.1.6] - 2026-08-31
 
 ### Исправлено
 
-- Уточнена проверка package safety: обычные документационные примеры `secret:`
-  и `password =` не считаются секретами, а реальные credential assignments,
-  private keys и machine-specific paths по-прежнему блокируются.
-- PR metadata schema требует все шесть обязательных разделов.
-- Self-check команды не создают Python bytecode в рабочем дереве.
+- Усилены package safety, PR metadata, changelog и Legacy Impact validators.
+- Добавлены fail-closed ошибки Git/GitHub discovery и безопасные self-check команды.
 
 ### Совместимость
 
-- CLI и validator API обратно совместимы с `v0.1.5`.
+- CLI и validator API совместимы с `v0.1.5`.
 - Откат: immutable `v0.1.5`.
 
 ### Проверки

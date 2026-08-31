@@ -25,6 +25,7 @@ provider and production gates remain in this repository's adapter.
   `schemas/` and `templates/`.
 - Release-candidate contracts and adapter interfaces.
 - Dev manifest adapter interface with lock/atomic-promotion semantics.
+- A bounded `skills/development-process/SKILL.md` for Codex-compatible agents.
 - Self-test, secret/path/provenance scan and clean sample-project quickstart.
 
 ## Portable package
@@ -68,11 +69,11 @@ contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.7`;
-`v0.1.6` remains the rollback ref. A consumer must pin the immutable release
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.8`;
+`v0.1.7` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-The next planned release is `v0.1.8`. Until it is cut, keep `VERSION` and the
-package metadata at the current published version and treat the new files as
-unreleased changes. Publish only after the clean self-check, package scan,
-provenance scan and immutable tag/release procedure pass.
+Migration from `v0.1.7` to `v0.1.8` adds strict feature-directory/spec
+containment checks and source-revision binding. Consumers should run the same
+self-test and package scan after updating their pinned ref. Rollback is the
+immutable `v0.1.7` ref.
