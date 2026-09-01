@@ -114,7 +114,10 @@ def context_budget(root: Path, *, max_bytes: int = 32 * 1024, max_file_bytes: in
     paths: list[Path] = []
     for base, directories, files in os.walk(root):
         directories[:] = [name for name in directories if name not in _CONTEXT_EXCLUDED_DIRS]
-        paths.extend(Path(base) / name for name in files if name in _INSTRUCTION_NAMES)
+        active_names = set(files)
+        if "AGENTS.override.md" in active_names:
+            active_names.discard("AGENTS.md")
+        paths.extend(Path(base) / name for name in active_names if name in _INSTRUCTION_NAMES)
     paths.sort()
     errors: list[str] = []
     total = 0
@@ -188,8 +191,8 @@ def _feature_ids_in_tree(root: Path) -> set[str]:
             ["git", "-C", str(root), "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
             text=True, stderr=subprocess.DEVNULL,
         )
-    except (OSError, subprocess.CalledProcessError):
-        refs = ""
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"cannot inspect Git refs for Feature ID collision safety: {exc}") from exc
     for ref in refs.splitlines():
         match = re.search(r"(?:^|/)(?:F)?(\d{3,})(?:[-_/]|$)", ref, re.IGNORECASE)
         if match:
@@ -297,8 +300,8 @@ def reserve_feature_id(
         reservations.append({
             "feature_id": number,
             "owner": owner.strip(),
-            "issue": issue.strip() if issue else None,
-            "branch": branch.strip() if branch else None,
+            "issue": issue.strip() if isinstance(issue, str) and issue.strip() else None,
+            "branch": branch.strip() if isinstance(branch, str) and branch.strip() else None,
             "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
         })
         ledger_path.parent.mkdir(parents=True, exist_ok=True)
@@ -596,7 +599,7 @@ _PR_REQUIRED_SECTIONS = (
 )
 
 
-def pr_metadata(body: Any, feature_id: str) -> list[str]:
+def pr_metadata(body: Any, feature_id: str, *, expected_source_sha: str | None = None) -> list[str]:
     """Validate the machine-checkable metadata contract in a pull request."""
     if not isinstance(body, str):
         return ["PR body must be a string"]
@@ -634,8 +637,14 @@ def pr_metadata(body: Any, feature_id: str) -> list[str]:
         errors.append(f"Feature ID mismatch: expected {expected_feature}, got {marker.group(1)}")
     if not re.search(r"Umbrella issue:\s*`?#\d+", body):
         errors.append("umbrella issue is required")
-    if not re.search(r"Exact source SHA[^\n]*\b([0-9a-fA-F]{40})\b", body):
+    source_match = re.search(r"Exact source SHA[^\n]*\b([0-9a-fA-F]{40})\b", body)
+    if not source_match:
         errors.append("exact source SHA evidence is required")
+    elif expected_source_sha is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", expected_source_sha):
+            errors.append("expected_source_sha must be a full 40-character SHA")
+        elif source_match.group(1).lower() != expected_source_sha.lower():
+            errors.append("exact source SHA does not match the expected PR head")
     if not re.search(r"Spec task IDs:\s*`?T\d{3,}", body):
         errors.append("at least one Spec task ID is required")
     issue_section = sections.get("## Issues", "")
@@ -677,7 +686,7 @@ def package_safety(package_root: Path) -> list[str]:
         re.IGNORECASE,
     )
     credential_assignment = re.compile(
-        r"(?:\b(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url|bearer)\s*[:=]\s*['\"]?"
+        r"(?:\b(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url)\s*[:=]\s*['\"]"
         r"|\bauthorization\s*:\s*bearer\s+['\"]?)"
         r"[A-Za-z0-9][A-Za-z0-9_./+=:-]{7,}",
         re.IGNORECASE,
@@ -754,6 +763,8 @@ def self_test() -> int:
         "\n## Перед merge\n- evidence recorded\n"
     )
     assert pr_metadata(good_pr, "216") == []
+    assert pr_metadata(good_pr, "216", expected_source_sha=sha) == []
+    assert any("does not match" in error for error in pr_metadata(good_pr, "216", expected_source_sha="b" * 40))
     assert any("Feature ID mismatch" in error for error in pr_metadata(good_pr.replace("F216", "F215"), "216"))
     assert any("missing PR section" in error for error in pr_metadata(good_pr.replace("## Issues", "## Links"), "216"))
     empty_quality = good_pr.replace("## Как проверено\n- `ci --fast`: passed", "## Как проверено\n").replace(
@@ -818,6 +829,10 @@ def self_test() -> int:
         documentation = package / "README.md"
         documentation.write_text("api" + '_key = "RealCredential123456"\n', encoding="utf-8")
         assert package_safety(package)
+        ordinary_package = root / "ordinary-package"
+        ordinary_package.mkdir()
+        (ordinary_package / "ordinary.py").write_text("token = response\n", encoding="utf-8")
+        assert package_safety(ordinary_package) == []
         bearer_package = root / "bearer-package"
         bearer_package.mkdir()
         (bearer_package / "README.md").write_text(
@@ -834,6 +849,10 @@ def self_test() -> int:
             "# Nested\n\n- Never commit private data to the repository.\n", encoding="utf-8"
         )
         assert any("duplicated stable instruction" in error for error in context_budget(root))
+        (root / "nested" / "AGENTS.override.md").write_text(
+            "# Override\n\n- Use the scoped override for this directory.\n", encoding="utf-8"
+        )
+        assert not any("duplicated stable instruction" in error for error in context_budget(root))
         oversized = root / "oversized" / "AGENTS.md"
         oversized.parent.mkdir()
         oversized.write_bytes(b"\xff" * 17)
@@ -843,9 +862,18 @@ def self_test() -> int:
 
         # Reservation is serialized by the ledger lock and never reuses IDs
         # already present in specs, fragments, refs or earlier reservations.
+        git_init = subprocess.run(
+            ["git", "-C", str(root), "init", "--quiet"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert git_init.returncode == 0
         ledger = root / "coordinator" / "feature-ids.json"
         assert reserve_feature_id(root, ledger=ledger, owner="agent-a") == "002"
         assert reserve_feature_id(root, ledger=ledger, owner="agent-b") == "003"
+        assert reserve_feature_id(root, ledger=ledger, owner="agent-c", issue="   ", branch="   ") == "004"
         try:
             reserve_feature_id(root, ledger=ledger, requested="F002", owner="agent-c")
         except ValueError as exc:
@@ -882,6 +910,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--context-file-budget", type=int, default=16 * 1024)
     parser.add_argument("--pr-body-file", type=Path, help="validate a pull-request body against the metadata contract")
     parser.add_argument("--feature-id", help="expected Feature ID for --pr-body-file (FNNN or NNN)")
+    parser.add_argument("--expected-source-sha", help="expected PR head SHA for --pr-body-file")
     parser.add_argument("--reserve-feature-id", action="store_true", help="atomically reserve the next Feature ID")
     parser.add_argument("--requested-feature-id", help="reserve this exact Feature ID instead of allocating the next one")
     parser.add_argument("--feature-id-ledger", type=Path, help="shared reservation ledger path")
@@ -913,7 +942,7 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             print(f"harness-check: ERROR: cannot read PR body: {exc}", file=sys.stderr)
             return 1
-        errors = pr_metadata(body, args.feature_id)
+        errors = pr_metadata(body, args.feature_id, expected_source_sha=args.expected_source_sha)
         if errors:
             for error in errors:
                 print(f"harness-check: ERROR: {error}", file=sys.stderr)

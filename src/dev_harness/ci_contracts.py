@@ -10,6 +10,7 @@ _SAFE = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 _KEY = re.compile(r"^[A-Za-z0-9._:/-]{1,512}$")
 _GROUP_ID = re.compile(r"^[A-Za-z0-9._:-]{1,256}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-fA-F]{64}$")
+_NULL_SHA = "0" * 40
 _UTC_RFC3339 = re.compile(
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$"
 )
@@ -17,6 +18,21 @@ _EVENTS = {"pull_request", "merge_group", "workflow_dispatch"}
 _STATUSES = {"passed", "failed", "cancelled", "superseded", "stale", "ambiguous"}
 _DECISIONS = {"pending", "approved", "rejected", "blocked"}
 _FEATURE_ID = re.compile(r"^(?:F)?[0-9]{3,}$")
+
+
+def _parse_utc_timestamp(value: str) -> dt.datetime:
+    """Parse RFC3339 on Python 3.9, which accepts at most microseconds."""
+    normalized = re.sub(
+        r"\.(\d+)(Z|\+00:00)$",
+        lambda match: "." + match.group(1)[:6] + match.group(2),
+        value,
+    )
+    return dt.datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+
+
+def _feature_number(value: str) -> str | None:
+    match = re.fullmatch(r"F?(\d{3,})", value.strip(), re.IGNORECASE)
+    return match.group(1) if match else None
 
 
 class IdentityError(ValueError):
@@ -56,10 +72,12 @@ def resolve_event_identity(
     payload_name = event.get("event_name")
     if payload_name is not None and (not isinstance(payload_name, str) or not payload_name.strip()):
         raise IdentityError("event.event_name must be a non-empty string when present")
+    if event_name is not None and (not isinstance(event_name, str) or not event_name.strip()):
+        raise IdentityError("event_name argument must be a non-empty string")
     if event_name and payload_name and event_name != payload_name:
         raise IdentityError("event_name argument conflicts with event.event_name")
-    name = event_name or str(payload_name or "").strip()
-    if name not in _EVENTS:
+    name = event_name or (payload_name.strip() if isinstance(payload_name, str) else "")
+    if not isinstance(name, str) or name not in _EVENTS:
         raise IdentityError("unsupported or malformed event")
     if name == "pull_request":
         pull = event.get("pull_request")
@@ -168,21 +186,22 @@ def ci_receipt(data: Any) -> list[str]:
     base = data.get("base_sha")
     if base is not None and (not isinstance(base, str) or not _SHA.fullmatch(base)):
         errors.append("base_sha must be null or a full 40-character SHA")
-    if event in {"pull_request", "merge_group"} and (not isinstance(base, str) or not _SHA.fullmatch(base)):
+    valid_event = isinstance(event, str) and event in _EVENTS
+    if valid_event and event in {"pull_request", "merge_group"} and (not isinstance(base, str) or not _SHA.fullmatch(base)):
         errors.append("base_sha is required for PR and merge_group events")
     pull_numbers = data.get("pull_request_numbers")
     if not isinstance(pull_numbers, list) or any(isinstance(x, bool) or not isinstance(x, int) or x < 1 for x in pull_numbers) or len(set(pull_numbers)) != len(pull_numbers):
         errors.append("pull_request_numbers must contain unique positive integers")
-    elif event == "pull_request" and len(pull_numbers) != 1:
+    elif valid_event and event == "pull_request" and len(pull_numbers) != 1:
         errors.append("pull_request events require exactly one pull request number")
-    elif event == "merge_group" and not pull_numbers:
+    elif valid_event and event == "merge_group" and not pull_numbers:
         errors.append("merge_group events require a complete PR mapping")
     group_id = data.get("merge_group_id")
-    if event == "merge_group" and (not isinstance(group_id, str) or not _GROUP_ID.fullmatch(group_id)):
+    if valid_event and event == "merge_group" and (not isinstance(group_id, str) or not _GROUP_ID.fullmatch(group_id)):
         errors.append("merge_group_id is required for merge_group events")
     elif group_id is not None and (not isinstance(group_id, str) or not _SAFE.fullmatch(group_id)):
         errors.append("merge_group_id is invalid")
-    elif event != "merge_group" and group_id is not None:
+    elif valid_event and event != "merge_group" and group_id is not None:
         errors.append("merge_group_id is only valid for merge_group events")
     digest = data.get("local_evidence_digest")
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
@@ -194,7 +213,7 @@ def ci_receipt(data: Any) -> list[str]:
                   if isinstance(data.get(key), str) and _SHA.fullmatch(data[key])]
     if len(sha_values) == 4 and len(set(sha_values)) != 1:
         errors.append("target and observed SHAs must match")
-    if event == "workflow_dispatch":
+    if valid_event and event == "workflow_dispatch":
         if base is not None:
             errors.append("workflow_dispatch base_sha must be null")
         if pull_numbers != []:
@@ -228,12 +247,19 @@ def ci_receipt(data: Any) -> list[str]:
         errors.append("passed receipt cannot have cancellation_state=cancelled")
     if status == "passed" and supersession_state == "superseded":
         errors.append("passed receipt cannot have supersession_state=superseded")
+    for key in ("target_sha", "requested_sha", "observed_sha_start", "observed_sha_end"):
+        if data.get(key) == _NULL_SHA:
+            errors.append(f"{key} must not be the all-zero placeholder SHA")
+    if base == _NULL_SHA:
+        errors.append("base_sha must not be the all-zero placeholder SHA")
+    if digest == "sha256:" + ("0" * 64):
+        errors.append("local_evidence_digest must not be the all-zero placeholder digest")
     timestamps: dict[str, dt.datetime] = {}
     for key in ("started_at", "finished_at"):
         value = data.get(key)
         try:
             parsed = (
-                dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+                _parse_utc_timestamp(value)
                 if isinstance(value, str) and _UTC_RFC3339.fullmatch(value)
                 else None
             )
@@ -316,7 +342,12 @@ def release_train(data: Any) -> list[str]:
         return value
 
     feature_ids = unique_strings("feature_ids", _FEATURE_ID)
+    if feature_ids is not None:
+        normalized_feature_ids = [_feature_number(item) for item in feature_ids]
+        if None in normalized_feature_ids or len(set(normalized_feature_ids)) != len(normalized_feature_ids):
+            errors.append("feature_ids must be unique after normalizing the optional F prefix")
     merge_group_ids = unique_strings("merge_group_ids", _GROUP_ID, non_empty=False)
+    decision = data.get("decision")
     def validate_lineage(
         key: str,
         expected_event: str,
@@ -331,6 +362,8 @@ def release_train(data: Any) -> list[str]:
         for index, receipt in enumerate(receipts):
             receipt_errors = ci_receipt(receipt)
             errors.extend(f"{key}[{index}]: {error}" for error in receipt_errors)
+            if decision == "approved" and isinstance(receipt, dict) and receipt.get("status") != "passed":
+                errors.append(f"{key}[{index}] must be passed for an approved release train")
             if isinstance(receipt, dict) and receipt.get("event_name") != expected_event:
                 errors.append(f"{key}[{index}] event_name must be {expected_event}")
             if isinstance(receipt, dict) and expected_event == "pull_request":
@@ -383,11 +416,12 @@ def release_train(data: Any) -> list[str]:
     digest = data.get("changelog_digest")
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
         errors.append("changelog_digest must be sha256:<64 hex>")
-    decision = data.get("decision")
     if not isinstance(decision, str) or decision not in _DECISIONS:
         errors.append("invalid decision")
     if decision == "approved" and not isinstance(authoritative, dict):
         errors.append("approved release train requires authoritative_full_ci_receipt")
+    if decision == "approved" and synthetic is None:
+        errors.append("approved release train requires synthetic_merge_sha")
     rollback = data.get("rollback_target")
     if not isinstance(rollback, str) or not _KEY.fullmatch(rollback):
         errors.append("rollback_target must be a safe non-empty string")
@@ -428,6 +462,9 @@ def self_test() -> None:
         "concurrency_key": "pr-1",
     }
     assert ci_receipt(good) == []
+    assert ci_receipt({**good, "event_name": {"malformed": True}})
+    assert ci_receipt({**good, "target_sha": _NULL_SHA})
+    assert ci_receipt({**good, "local_evidence_digest": "sha256:" + ("0" * 64)})
     assert ci_receipt({**good, "observed_sha_end": "d" * 40})
     assert ci_receipt({**good, "started_at": "2026-W01-1T00:00:00Z"})
     assert ci_receipt({**good, "cancellation_state": "cancelled"})
@@ -442,6 +479,7 @@ def self_test() -> None:
     assert release_train(train) == []
     assert release_train({**train, "included_prs": [1, 2]})
     assert release_train({**train, "decision": "approved"})
+    assert release_train({**train, "feature_ids": ["001", "F001"]})
     two_pr_train = {
         **train,
         "included_prs": [1, 2],
@@ -485,5 +523,6 @@ def self_test() -> None:
     assert release_train(synthetic_train) == []
     assert release_train({**synthetic_train, "merge_group_receipts": []})
     assert release_train({**synthetic_train, "authoritative_full_ci_receipt": {**authoritative, "target_sha": sha}})
+    assert release_train({**synthetic_train, "pr_receipts": [{**good, "status": "failed", "reason": "test failure"}]})
     malformed = {**good, "target_sha": {}}
     assert ci_receipt(malformed)

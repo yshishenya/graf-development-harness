@@ -41,8 +41,9 @@ metadata or agent governance.
    required reviewer and approval gates are complete. Preserve metadata-only
    evidence and never write secrets or private user data into it.
 
-The consumer CI should run `--pr-body-file <body> --feature-id <FNNN>` on every
-pull request and `--context-check` on the repository root. This keeps PR
+The consumer CI should run `--pr-body-file <body> --feature-id <FNNN>
+--expected-source-sha <PR head SHA>` on every pull request and `--context-check`
+on the repository root. This keeps PR
 metadata machine-checkable and prevents stable instructions from growing past
 the default 32 KiB always-on context budget.
 

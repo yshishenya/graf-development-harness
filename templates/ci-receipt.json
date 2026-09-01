@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
-  "status": "passed",
+  "status": "failed",
+  "reason": "Replace this template with metadata from a real CI run.",
   "event_name": "pull_request",
   "workflow": "governance",
   "run_id": "run-0001",

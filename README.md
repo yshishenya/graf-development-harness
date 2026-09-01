@@ -57,7 +57,7 @@ The validator API is also available without installing dependencies:
 from dev_harness.validators import ci_evidence, pr_metadata
 
 assert ci_evidence(evidence) == []
-assert pr_metadata(pull_request_body, "216") == []
+assert pr_metadata(pull_request_body, "216", expected_source_sha=expected_head_sha) == []
 ```
 
 Reserve a Feature ID before creating a branch or Spec Kit feature. Point
@@ -79,7 +79,8 @@ replacement for GitHub's issue canon.
 Validate a PR body in CI with the same dependency-free CLI:
 
 ```sh
-./bin/harness-check --pr-body-file "$RUNNER_TEMP/pr-body.md" --feature-id F230
+./bin/harness-check --pr-body-file "$RUNNER_TEMP/pr-body.md" --feature-id F230 \
+  --expected-source-sha "$GITHUB_SHA"
 ```
 
 `--context-check` checks the layered `AGENTS.md` / `AGENTS.override.md` files
@@ -115,7 +116,8 @@ Release-train receipts are lineage-bound: every declared PR and merge group
 must have one matching receipt. PR receipts target `source_sha`; merge-group
 and authoritative receipts target `synthetic_merge_sha` when present, otherwise
 authoritative CI targets `post_merge_sha` or `source_sha`. An `approved` train
-must include a passed authoritative receipt.
+must include a synthetic merge SHA, passed lineage receipts and a passed
+authoritative receipt.
 
 The package scan is intentionally run before building or installing the
 package: generated `build/`, `*.egg-info/` and bytecode files are not
