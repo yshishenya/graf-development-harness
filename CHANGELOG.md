@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.1.13] - 2026-09-01 (unreleased)
+## [0.1.13] - 2026-09-01
 
 ### Добавлено
 
@@ -16,6 +16,9 @@
 - Проверка 32 KiB bounded agent context, дедупликация стабильных правил,
   канонический `Legacy Impact: Trigger`, `SECURITY.md` и `CODEOWNERS`.
 - Сохранено fail-closed обнаружение bearer credentials из публичного `v0.1.12`.
+- Контекст feature теперь проверяет `schema_version` и допустимый `risk_lane`.
+- CI timestamp принимает RFC3339 precision любой длины, а changelog-фрагменты
+  требуют явный `known_limitations`.
 
 ### Совместимость
 
@@ -26,7 +29,7 @@
 
 - Self-test, clean sample smoke-test и package-safety scan — PASS.
 - Сборка wheel/sdist и проверка содержимого артефактов — PASS.
-- Публикация и immutable tag отложены до owner approval и remote rehearsal.
+- GitHub Actions self-test для Python 3.9 и 3.12 — PASS.
 
 ## [0.1.12] - 2026-09-01
 
@@ -44,7 +47,6 @@
 
 - Self-test, clean sample smoke-test, package-safety scan и runtime-version
   check — PASS.
-
 ## [0.1.11] - 2026-08-31
 
 ### Исправлено

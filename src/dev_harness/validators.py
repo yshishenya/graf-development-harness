@@ -31,6 +31,10 @@ def context(root: Path) -> list[str]:
     if not isinstance(data, dict):
         return ["invalid feature pointer: expected a JSON object"]
     errors = []
+    if data.get("schema_version") != 1:
+        errors.append("schema_version must be 1")
+    if data.get("risk_lane") not in _RISK_LANES:
+        errors.append("risk_lane must be one of: " + ", ".join(sorted(_RISK_LANES)))
     for key in (
         "feature_directory", "feature_id", "branch", "source_sha", "owner",
         "risk_lane", "owned_paths",
@@ -317,7 +321,7 @@ def fragments(root: Path) -> list[str]:
             errors.append(f"{path}: filename must match feature_id")
         if not re.search(r"^summary:\s*\S", text, re.MULTILINE):
             errors.append(f"{path}: summary must be non-empty")
-        for key in ("schema_version:", "category:", "issue:", "tasks:", "compatibility:", "release_notes:"):
+        for key in ("schema_version:", "category:", "issue:", "tasks:", "compatibility:", "known_limitations:", "release_notes:"):
             if not re.search(r"^" + re.escape(key), text, re.MULTILINE):
                 errors.append(f"{path}: missing {key}")
         forbidden_literals = (
@@ -373,8 +377,9 @@ _CI_LANES = {"focused", "fast", "full"}
 _CI_STATUSES = {"passed", "failed", "stale", "cancelled", "ambiguous"}
 _STALE_CI_STATUSES = {"failed", "stale", "cancelled", "ambiguous"}
 _UTC_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|\+00:00)$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|\+00:00)$"
 )
+_RISK_LANES = {"tiny-low-risk", "active-spec-kit", "significant-feature", "high-risk-product", "release-deploy"}
 _CI_ALLOWED_FIELDS = {
     "run_id", "lane", "requested_sha", "observed_sha_start", "observed_sha_end",
     "status", "started_at", "finished_at", "commands", "skipped_gates", "scope",
@@ -724,9 +729,7 @@ def self_test() -> int:
     assert any("RFC3339 UTC timestamp" in error for error in ci_evidence(
         dict(good_evidence, started_at="2026-08-31T00:00:00-00:00")
     ))
-    assert any("RFC3339 UTC timestamp" in error for error in ci_evidence(
-        dict(good_evidence, started_at="2026-08-31T00:00:00.1234567Z")
-    ))
+    assert ci_evidence(dict(good_evidence, started_at="2026-08-31T00:00:00.1234567Z")) == []
     assert any("forbidden private or credential" in error for error in ci_evidence(
         dict(good_evidence, scope="Authorization: " + "Bearer abcdefghijkl")
     ))
@@ -766,7 +769,8 @@ def self_test() -> int:
                     "branch": "test/001-example",
                     "source_sha": "a" * 40,
                     "owner": "test",
-                    "risk_lane": "low",
+                    "schema_version": 1,
+                    "risk_lane": "tiny-low-risk",
                     "owned_paths": ["specs/001-example"],
                 }
             ),
