@@ -121,15 +121,20 @@ def context_budget(root: Path, *, max_bytes: int = 32 * 1024, max_file_bytes: in
     rules: dict[str, Path] = {}
     for path in paths:
         try:
+            size = path.stat().st_size
+        except OSError as exc:
+            errors.append(f"cannot read instruction file {path}: {exc}")
+            continue
+        total += size
+        if size > max_file_bytes:
+            errors.append(f"instruction file exceeds {max_file_bytes} bytes: {path} ({size})")
+            continue
+        try:
             raw = path.read_bytes()
             text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             errors.append(f"cannot read instruction file {path}: {exc}")
             continue
-        size = len(raw)
-        total += size
-        if size > max_file_bytes:
-            errors.append(f"instruction file exceeds {max_file_bytes} bytes: {path} ({size})")
         for line in text.splitlines():
             normalized = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", line)
             normalized = re.sub(r"\s+", " ", normalized).strip().lower()
@@ -829,6 +834,12 @@ def self_test() -> int:
             "# Nested\n\n- Never commit private data to the repository.\n", encoding="utf-8"
         )
         assert any("duplicated stable instruction" in error for error in context_budget(root))
+        oversized = root / "oversized" / "AGENTS.md"
+        oversized.parent.mkdir()
+        oversized.write_bytes(b"\xff" * 17)
+        oversized_errors = context_budget(root, max_bytes=64, max_file_bytes=16)
+        assert any("instruction file exceeds 16 bytes" in error for error in oversized_errors)
+        assert not any("cannot read instruction file" in error for error in oversized_errors)
 
         # Reservation is serialized by the ledger lock and never reuses IDs
         # already present in specs, fragments, refs or earlier reservations.
