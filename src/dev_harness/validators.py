@@ -407,8 +407,11 @@ def _utc_timestamp(data: dict[str, Any], key: str, errors: list[str]) -> Optiona
         if value is not None:
             errors.append(f"{key} must be an RFC3339 UTC timestamp")
         return None
+    # Python 3.9 accepts at most six fractional digits. RFC3339 permits more;
+    # retain format acceptance and truncate only for datetime comparison.
+    normalized = re.sub(r"(\.\d{6})\d+(?=Z|\+00:00$)", r"\1", value)
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     except ValueError:
         errors.append(f"{key} must be an RFC3339 UTC timestamp")
         return None
