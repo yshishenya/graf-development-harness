@@ -1,22 +1,52 @@
 # Changelog
 
-## [0.1.13] - 2026-09-01
+## [0.1.13] - не опубликовано (кандидат)
 
-### Исправлено
+### Добавлено
 
+- Fail-closed resolver для `pull_request`, `merge_group` и ручного запуска.
+- Metadata-only CI receipt contract с exact-SHA и stale/superseded защитой.
+- JSON schemas и templates для CI receipt и release train.
+- OpenAI-style templates для `GOALS.md`, `PROMPTS.md`, bounded phase/context и
+  metadata-only build log.
+- Атомарный allocator Feature ID с блокировкой ledger и проверкой локальных
+  refs/specs перед резервированием.
+- CLI-проверка PR metadata и CI smoke-test для Feature ID, issue/task linkage и
+  exact-SHA evidence.
+- Проверка 32 KiB bounded agent context, дедупликация стабильных правил,
+  канонический `Legacy Impact: Trigger`, `SECURITY.md` и `CODEOWNERS`.
+- Сохранено fail-closed обнаружение bearer credentials из публичного `v0.1.12`.
 - Контекст feature теперь проверяет `schema_version` и допустимый `risk_lane`.
 - CI timestamp принимает RFC3339 precision любой длины, а changelog-фрагменты
   требуют явный `known_limitations`.
 
 ### Совместимость
 
-- Python 3.9+; validator API обратно совместим с `v0.1.12`.
+- Python 3.9+; существующий CLI и validator API сохраняются.
 - Откат: immutable `v0.1.12`.
 
 ### Проверки
 
-- Self-test и package-safety scan — PASS.
+- Self-test, clean sample smoke-test и package-safety scan — PASS.
+- Сборка wheel/sdist и проверка содержимого артефактов — PASS.
+- GitHub Actions self-test для Python 3.9 и 3.12 — PASS.
 
+## [0.1.12] - 2026-09-01
+
+### Исправлено
+
+- Проверка CI evidence теперь fail-closed распознает любой bearer-токен,
+  включая короткие значения и форму `Authorization: Bearer ...`.
+
+### Совместимость
+
+- Python 3.9+; CLI и validator API обратно совместимы с `v0.1.11`.
+- Откат: immutable `v0.1.11`.
+
+### Проверки
+
+- Self-test, clean sample smoke-test, package-safety scan и runtime-version
+  check — PASS.
 ## [0.1.11] - 2026-08-31
 
 ### Исправлено

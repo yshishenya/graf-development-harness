@@ -5,12 +5,19 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - the published target is Unix-first
+    fcntl = None
 
 
 def context(root: Path) -> list[str]:
@@ -87,6 +94,249 @@ def context(root: Path) -> list[str]:
     return errors
 
 
+_INSTRUCTION_NAMES = {"AGENTS.md", "AGENTS.override.md"}
+_CONTEXT_EXCLUDED_DIRS = {".git", ".venv", "venv", "node_modules", "build", "dist", ".tox"}
+_STABLE_RULE_PREFIXES = (
+    "always ", "before ", "codex ", "do ", "keep ", "must ", "never ",
+    "prefer ", "read ", "require ", "stop ", "use ",
+)
+
+
+def context_budget(root: Path, *, max_bytes: int = 32 * 1024, max_file_bytes: int = 16 * 1024) -> list[str]:
+    """Enforce a bounded, non-duplicated OpenAI-style instruction context.
+
+    The check is intentionally limited to layered AGENTS files.  Templates,
+    specs and historical logs are progressive-disclosure material and must not
+    silently become always-on context.
+    """
+    if max_bytes < 1 or max_file_bytes < 1:
+        return ["context budgets must be positive"]
+    root = root.resolve()
+    directories_seen: list[Path] = []
+    for base, directories, _files in os.walk(root):
+        directories[:] = [name for name in directories if name not in _CONTEXT_EXCLUDED_DIRS]
+        directories_seen.append(Path(base).resolve())
+    directories_seen = sorted(set(directories_seen))
+    selected: dict[Path, Path] = {}
+    for directory in directories_seen:
+        override = directory / "AGENTS.override.md"
+        regular = directory / "AGENTS.md"
+        if override.is_file():
+            selected[directory] = override
+        elif regular.is_file():
+            selected[directory] = regular
+    paths = sorted(set(selected.values()))
+    errors: list[str] = []
+    sizes: dict[Path, int] = {}
+    contents: dict[Path, str] = {}
+    for path in paths:
+        try:
+            size = path.stat().st_size
+        except OSError as exc:
+            errors.append(f"cannot read instruction file {path}: {exc}")
+            continue
+        sizes[path] = size
+        if size > max_file_bytes:
+            errors.append(f"instruction file exceeds {max_file_bytes} bytes: {path} ({size})")
+            continue
+        try:
+            raw = path.read_bytes()
+            contents[path] = raw.decode("utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            errors.append(f"cannot read instruction file {path}: {exc}")
+            continue
+    reported_duplicates: set[tuple[Path, Path, str]] = set()
+    max_chain = 0
+    for directory in directories_seen:
+        chain: list[Path] = []
+        current = directory
+        while True:
+            if current in selected:
+                chain.append(selected[current])
+            if current == root:
+                break
+            if root not in current.parents:
+                break
+            current = current.parent
+        chain.reverse()
+        max_chain = max(max_chain, sum(sizes.get(path, 0) for path in chain))
+        rules: dict[str, Path] = {}
+        for path in chain:
+            for line in contents.get(path, "").splitlines():
+                normalized = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", line)
+                normalized = re.sub(r"\s+", " ", normalized).strip().lower()
+                if len(normalized) < 24 or normalized.startswith(("#", "```")):
+                    continue
+                if not normalized.startswith(_STABLE_RULE_PREFIXES):
+                    continue
+                previous = rules.get(normalized)
+                if previous is not None and previous != path:
+                    key = (previous, path, normalized)
+                    if key not in reported_duplicates:
+                        errors.append(f"duplicated stable instruction between {previous} and {path}: {normalized}")
+                        reported_duplicates.add(key)
+                else:
+                    rules[normalized] = path
+    if max_chain > max_bytes:
+        errors.append(f"applicable AGENTS context exceeds {max_bytes} bytes: {max_chain}")
+    return errors
+
+
+def _feature_number(value: str) -> Optional[str]:
+    match = re.fullmatch(r"F?(\d{3,})", value.strip(), re.IGNORECASE)
+    if not match or int(match.group(1)) < 1:
+        return None
+    return match.group(1)
+
+
+def _feature_ids_in_tree(root: Path) -> set[str]:
+    found: set[str] = set()
+    specs = root / "specs"
+    if specs.is_dir():
+        for path in specs.iterdir():
+            match = re.match(r"^(\d{3,})-", path.name)
+            if match:
+                found.add(match.group(1))
+    fragments_dir = root / "changes" / "unreleased"
+    if fragments_dir.is_dir():
+        for path in fragments_dir.glob("F*.yaml"):
+            number = _feature_number(path.stem)
+            if number:
+                found.add(number)
+    pointer = root / ".specify" / "feature.json"
+    if pointer.is_file():
+        try:
+            data = json.loads(pointer.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"cannot read active Feature ID pointer: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("feature_id"), str) or _feature_number(data["feature_id"]) is None:
+            raise RuntimeError("active Feature ID pointer must be a JSON object")
+        found.add(_feature_number(data["feature_id"]))
+    try:
+        refs = subprocess.check_output(
+            ["git", "-C", str(root), "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
+            text=True, stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError(f"cannot inspect Git refs for Feature ID collision safety: {exc}") from exc
+    for ref in refs.splitlines():
+        match = re.search(r"(?:^|/)(?:F)?(\d{3,})(?:[-_/]|$)", ref, re.IGNORECASE)
+        if match:
+            found.add(match.group(1))
+    return found
+
+
+def _read_reservation_ledger(path: Path) -> tuple[dict[str, Any], list[str]]:
+    if not path.exists():
+        return {"schema_version": 1, "reservations": []}, []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {}, [f"invalid feature ID reservation ledger: {exc}"]
+    if not isinstance(data, dict) or data.get("schema_version") != 1 or not isinstance(data.get("reservations"), list):
+        return {}, ["feature ID reservation ledger must contain schema_version=1 and reservations array"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for index, row in enumerate(data["reservations"]):
+        if not isinstance(row, dict):
+            errors.append(f"reservation {index} must be an object")
+            continue
+        allowed = {"feature_id", "owner", "issue", "branch", "created_at"}
+        extra = set(row) - allowed
+        if extra:
+            errors.append(f"reservation {index} has unsupported fields: {', '.join(sorted(extra))}")
+        missing = {key for key in ("feature_id", "owner", "created_at") if key not in row}
+        if missing:
+            errors.append(f"reservation {index} is missing required fields: {', '.join(sorted(missing))}")
+        raw_id = row.get("feature_id")
+        number = _feature_number(raw_id) if isinstance(raw_id, str) else None
+        if number is None or not re.fullmatch(r"\d{3,}", raw_id or ""):
+            errors.append(f"reservation {index} has an invalid feature_id")
+        elif number in seen:
+            errors.append(f"reservation {index} duplicates feature_id {number}")
+        else:
+            seen.add(number)
+        owner_value = row.get("owner")
+        if not isinstance(owner_value, str) or not owner_value.strip():
+            errors.append(f"reservation {index} has an invalid owner")
+        for optional_key in ("issue", "branch"):
+            optional_value = row.get(optional_key)
+            if optional_value is not None and (not isinstance(optional_value, str) or not optional_value.strip()):
+                errors.append(f"reservation {index} has an invalid {optional_key}")
+        created_at = row.get("created_at")
+        if not isinstance(created_at, str) or not _UTC_TIMESTAMP_RE.fullmatch(created_at):
+            errors.append(f"reservation {index} has an invalid created_at")
+        else:
+            try:
+                parsed = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except ValueError:
+                parsed = None
+            if parsed is None or parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+                errors.append(f"reservation {index} has an invalid created_at")
+    return data, errors
+
+
+@contextmanager
+def _ledger_lock(path: Path):
+    """Serialize reservations across worktrees on Unix filesystems."""
+    if fcntl is None:
+        raise RuntimeError("atomic Feature ID reservation requires a Unix file-lock implementation")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def reserve_feature_id(
+    root: Path, *, ledger: Optional[Path] = None, requested: Optional[str] = None,
+    owner: Optional[str] = None, issue: Optional[str] = None, branch: Optional[str] = None,
+) -> str:
+    """Atomically reserve a never-before-used three-digit Feature ID.
+
+    The ledger must live on a filesystem shared by parallel worktrees (for
+    example a coordinator checkout). GitHub issue creation remains a separate
+    adapter concern; callers should record the umbrella issue in the ledger.
+    """
+    if not owner or not owner.strip():
+        raise ValueError("--owner is required for a Feature ID reservation")
+    ledger_path = (ledger or (root / ".specify" / "feature-id-reservations.json")).resolve()
+    with _ledger_lock(ledger_path):
+        data, errors = _read_reservation_ledger(ledger_path)
+        if errors:
+            raise ValueError("; ".join(errors))
+        occupied = _feature_ids_in_tree(root)
+        reservations = data["reservations"]
+        for row in reservations:
+            number = _feature_number(str(row.get("feature_id", "")))
+            if number:
+                occupied.add(number)
+        if requested is not None:
+            number = _feature_number(requested)
+            if number is None:
+                raise ValueError("requested Feature ID must be FNNN or NNN")
+            if number in occupied:
+                raise ValueError(f"Feature ID {number} is already used or reserved")
+        else:
+            next_number = max((int(item) for item in occupied), default=0) + 1
+            number = f"{next_number:03d}"
+        reservations.append({
+            "feature_id": number,
+            "owner": owner.strip(),
+            "issue": issue.strip() if isinstance(issue, str) and issue.strip() else None,
+            "branch": branch.strip() if isinstance(branch, str) and branch.strip() else None,
+            "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        })
+        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = ledger_path.with_name(ledger_path.name + f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary, ledger_path)
+    return number
+
+
 def fragments(root: Path) -> list[str]:
     directory = root / "changes" / "unreleased"
     errors: list[str] = []
@@ -134,22 +384,31 @@ def legacy(spec: Path) -> list[str]:
     if len(classifications) != 1:
         return [f"{spec}: Legacy Impact classification is invalid"]
     if classifications[0].lower() == "retain-with-exception":
-        for token in ("owner", "expiry", "trigger", "retirement task"):
-            field = re.search(
-                rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(token)}(?:\*\*)?[ \t]*:[ \t]*(\S.*)$",
+        fields = {
+            "owner": "Owner",
+            "expiry": "Expiry",
+            "removal trigger": "Removal trigger",
+            "risk": "Risk",
+            "validation": "Validation",
+            "retirement task": "Retirement task",
+        }
+        values: dict[str, str] = {}
+        for key, label in fields.items():
+            matches = re.findall(
+                rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?[ \t]*:[ \t]*(\S.*)$",
                 section,
                 re.IGNORECASE | re.MULTILINE,
             )
-            if not field:
-                return [f"{spec}: compatibility exception needs owner, expiry, trigger and retirement task"]
-            if token == "expiry":
-                value = field.group(1).strip().strip("`'\"")
-                try:
-                    expiry = dt.date.fromisoformat(value)
-                except ValueError:
-                    return [f"{spec}: compatibility exception needs an ISO expiry date"]
-                if expiry < dt.date.today():
-                    return [f"{spec}: expired legacy exception {value}"]
+            if len(matches) != 1 or not matches[0].strip():
+                return [f"{spec}: compatibility exception needs owner, expiry, trigger, risk, validation and retirement task"]
+            values[key] = matches[0].strip()
+        value = values["expiry"].strip("`'\"")
+        try:
+            expiry = dt.date.fromisoformat(value)
+        except ValueError:
+            return [f"{spec}: compatibility exception needs an ISO expiry date"]
+        if expiry < dt.date.today():
+            return [f"{spec}: expired legacy exception {value}"]
     return []
 
 
@@ -191,8 +450,11 @@ def _utc_timestamp(data: dict[str, Any], key: str, errors: list[str]) -> Optiona
         if value is not None:
             errors.append(f"{key} must be an RFC3339 UTC timestamp")
         return None
+    # Python 3.9 accepts at most six fractional digits. RFC3339 permits more;
+    # retain format acceptance and truncate only for datetime comparison.
+    normalized = re.sub(r"(\.\d{6})\d+(?=Z|\+00:00$)", r"\1", value)
     try:
-        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = dt.datetime.fromisoformat(normalized.replace("Z", "+00:00"))
     except ValueError:
         errors.append(f"{key} must be an RFC3339 UTC timestamp")
         return None
@@ -372,7 +634,7 @@ _PR_REQUIRED_SECTIONS = (
 )
 
 
-def pr_metadata(body: Any, feature_id: str) -> list[str]:
+def pr_metadata(body: Any, feature_id: str, *, expected_source_sha: str | None = None) -> list[str]:
     """Validate the machine-checkable metadata contract in a pull request."""
     if not isinstance(body, str):
         return ["PR body must be a string"]
@@ -400,15 +662,24 @@ def pr_metadata(body: Any, feature_id: str) -> list[str]:
     has_result = bool(re.search(r"\b(?:pass(?:ed)?|fail(?:ed)?|not[ -]?run|blocked)\b", verification_section, re.IGNORECASE))
     if not has_command or not has_result:
         errors.append("Как проверено requires command and result evidence")
-    marker = re.search(r"Feature ID:\s*`?F?(\d{3,})", body)
+    expected_feature = _feature_number(feature_id)
+    if expected_feature is None:
+        errors.append("expected feature_id must be FNNN or NNN")
+    marker = re.search(r"Feature ID:\s*`?F?(\d{3,})", body, re.IGNORECASE)
     if not marker:
         errors.append("Feature ID is required in PR body")
-    elif marker.group(1) != str(feature_id):
-        errors.append(f"Feature ID mismatch: expected {feature_id}, got {marker.group(1)}")
+    elif expected_feature is not None and marker.group(1) != expected_feature:
+        errors.append(f"Feature ID mismatch: expected {expected_feature}, got {marker.group(1)}")
     if not re.search(r"Umbrella issue:\s*`?#\d+", body):
         errors.append("umbrella issue is required")
-    if not re.search(r"Exact source SHA[^\n]*\b([0-9a-fA-F]{40})\b", body):
+    source_match = re.search(r"Exact source SHA[^\n]*\b([0-9a-fA-F]{40})\b", body)
+    if not source_match:
         errors.append("exact source SHA evidence is required")
+    elif expected_source_sha is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{40}", expected_source_sha):
+            errors.append("expected_source_sha must be a full 40-character SHA")
+        elif source_match.group(1).lower() != expected_source_sha.lower():
+            errors.append("exact source SHA does not match the expected PR head")
     if not re.search(r"Spec task IDs:\s*`?T\d{3,}", body):
         errors.append("at least one Spec task ID is required")
     issue_section = sections.get("## Issues", "")
@@ -450,9 +721,11 @@ def package_safety(package_root: Path) -> list[str]:
         re.IGNORECASE,
     )
     credential_assignment = re.compile(
-        r"\b(?:api[_-]?key|secret|password|bearer)\s*[:=]\s*['\"]?"
+        r"(?:^\s*(?:[-*]\s*)?(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url)\s*[:=]\s*['\"]?"
+        r"|^\s*authorization\s*:\s*bearer\s+['\"]?)"
+        r"(?!response\b|request\b|value\b|result\b|none\b|null\b|true\b|false\b)"
         r"[A-Za-z0-9][A-Za-z0-9_./+=:-]{7,}",
-        re.IGNORECASE,
+        re.IGNORECASE | re.MULTILINE,
     )
     for path in sorted(package_root.rglob("*")):
         relative = path.relative_to(package_root)
@@ -460,6 +733,9 @@ def package_safety(package_root: Path) -> list[str]:
             errors.append(f"symlink is not publishable: {relative}")
             continue
         if path.is_dir() or ".git" in path.parts:
+            continue
+        if "build" in relative.parts:
+            errors.append(f"generated artifact is not publishable: {relative}")
             continue
         if path.suffix in {".pyc", ".pyo"} or ".egg-info" in path.parts or path.name in {".DS_Store"}:
             errors.append(f"generated artifact is not publishable: {relative}")
@@ -479,6 +755,9 @@ def package_safety(package_root: Path) -> list[str]:
 
 
 def self_test() -> int:
+    from dev_harness.ci_contracts import self_test as ci_contracts_self_test
+
+    ci_contracts_self_test()
     sha = "a" * 40
     digest = "sha256:" + "b" * 64
     good_evidence = {
@@ -508,7 +787,10 @@ def self_test() -> int:
     ))
     assert ci_evidence(dict(good_evidence, started_at="2026-08-31T00:00:00.1234567Z")) == []
     assert any("forbidden private or credential" in error for error in ci_evidence(
-        dict(good_evidence, scope="Authorization: Bearer abcdefghijkl")
+        dict(good_evidence, scope="Authorization: " + "Bearer abcdefghijkl")
+    ))
+    assert any("forbidden private or credential" in error for error in ci_evidence(
+        dict(good_evidence, scope="authorization: " + "bearer x")
     ))
 
     good_pr = (
@@ -520,6 +802,8 @@ def self_test() -> int:
         "\n## Перед merge\n- evidence recorded\n"
     )
     assert pr_metadata(good_pr, "216") == []
+    assert pr_metadata(good_pr, "216", expected_source_sha=sha) == []
+    assert any("does not match" in error for error in pr_metadata(good_pr, "216", expected_source_sha="b" * 40))
     assert any("Feature ID mismatch" in error for error in pr_metadata(good_pr.replace("F216", "F215"), "216"))
     assert any("missing PR section" in error for error in pr_metadata(good_pr.replace("## Issues", "## Links"), "216"))
     empty_quality = good_pr.replace("## Как проверено\n- `ci --fast`: passed", "## Как проверено\n").replace(
@@ -560,16 +844,18 @@ def self_test() -> int:
         (root / "specs/001-example/spec.md").write_text(
             "# Example\n\n## Legacy Impact\n\n"
             "Classification: retain-with-exception\n"
-            "owner: platform\nexpiry: 2099-12-31\ntrigger: migration complete\n"
-            "retirement task: T999\n",
+            "Owner: platform\nExpiry: 2099-12-31\nRemoval trigger: migration complete\n"
+            "Risk: bounded compatibility risk\nValidation: smoke test\n"
+            "Retirement task: T999\n",
             encoding="utf-8",
         )
         assert legacy(root / "specs/001-example/spec.md") == []
         (root / "specs/001-example/spec.md").write_text(
             "# Example\n\n## Legacy Impact\n\n"
             "Classification: retain-with-exception\n"
-            "owner: platform\nexpiry: yesterday\ntrigger: migration complete\n"
-            "retirement task: T999\n",
+            "Owner: platform\nExpiry: yesterday\nRemoval trigger: migration complete\n"
+            "Risk: bounded compatibility risk\nValidation: smoke test\n"
+            "Retirement task: T999\n",
             encoding="utf-8",
         )
         assert any("ISO expiry date" in error for error in legacy(root / "specs/001-example/spec.md"))
@@ -579,9 +865,83 @@ def self_test() -> int:
             "pass" + "word = \"" + "x" * 24 + "\"\n", encoding="utf-8"
         )
         assert package_safety(package)
+        unquoted_package = root / "unquoted-package"
+        unquoted_package.mkdir()
+        (unquoted_package / "config.yaml").write_text("api_key: RealCredential123456\n", encoding="utf-8")
+        assert package_safety(unquoted_package)
+        build = package / "build"
+        build.mkdir()
+        (build / "generated.py").write_text("generated = True\n", encoding="utf-8")
+        assert package_safety(package)
         documentation = package / "README.md"
         documentation.write_text("api" + '_key = "RealCredential123456"\n', encoding="utf-8")
         assert package_safety(package)
+        ordinary_package = root / "ordinary-package"
+        ordinary_package.mkdir()
+        (ordinary_package / "ordinary.py").write_text("token = response\n", encoding="utf-8")
+        assert package_safety(ordinary_package) == []
+        bearer_package = root / "bearer-package"
+        bearer_package.mkdir()
+        (bearer_package / "README.md").write_text(
+            "Authorization: " + "Bearer abcdefgh\n", encoding="utf-8"
+        )
+        assert package_safety(bearer_package)
+
+        # Context is bounded and duplicate stable rules are rejected before
+        # they consume the always-on agent prompt budget.
+        (root / "AGENTS.md").write_text("# Rules\n\n- Never commit private data to the repository.\n", encoding="utf-8")
+        assert context_budget(root) == []
+        (root / "nested").mkdir()
+        (root / "nested" / "AGENTS.md").write_text(
+            "# Nested\n\n- Never commit private data to the repository.\n", encoding="utf-8"
+        )
+        assert any("duplicated stable instruction" in error for error in context_budget(root))
+        (root / "nested" / "AGENTS.override.md").write_text(
+            "# Override\n\n- Use the scoped override for this directory.\n", encoding="utf-8"
+        )
+        assert not any("duplicated stable instruction" in error for error in context_budget(root))
+        oversized = root / "oversized" / "AGENTS.md"
+        oversized.parent.mkdir()
+        oversized.write_bytes(b"\xff" * 17)
+        oversized_errors = context_budget(root, max_bytes=64, max_file_bytes=16)
+        assert any("instruction file exceeds 16 bytes" in error for error in oversized_errors)
+        assert not any("cannot read instruction file" in error for error in oversized_errors)
+
+        # Reservation is serialized by the ledger lock and never reuses IDs
+        # already present in specs, fragments, refs or earlier reservations.
+        git_init = subprocess.run(
+            ["git", "-C", str(root), "init", "--quiet"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert git_init.returncode == 0
+        ledger = root / "coordinator" / "feature-ids.json"
+        assert reserve_feature_id(root, ledger=ledger, owner="agent-a") == "002"
+        assert reserve_feature_id(root, ledger=ledger, owner="agent-b") == "003"
+        assert reserve_feature_id(root, ledger=ledger, owner="agent-c", issue="   ", branch="   ") == "004"
+        try:
+            reserve_feature_id(root, ledger=ledger, requested="F002", owner="agent-c")
+        except ValueError as exc:
+            assert "already used" in str(exc)
+        else:
+            raise AssertionError("a duplicate Feature ID reservation must fail")
+        malformed_ledger = root / "coordinator" / "malformed.json"
+        malformed_ledger.write_text(
+            json.dumps({"schema_version": 1, "reservations": [{"feature_id": "004"}]}),
+            encoding="utf-8",
+        )
+        try:
+            reserve_feature_id(root, ledger=malformed_ledger, owner="agent-d")
+        except ValueError as exc:
+            assert "missing required fields" in str(exc)
+        else:
+            raise AssertionError("incomplete reservation rows must fail closed")
+
+        pr_body = root / "pr-body.md"
+        pr_body.write_text(good_pr, encoding="utf-8")
+        assert pr_metadata(pr_body.read_text(encoding="utf-8"), "F216") == []
     print("harness-check: self-test OK")
     return 0
 
@@ -592,17 +952,58 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spec", type=Path)
     parser.add_argument("--package-root", type=Path)
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--context-check", action="store_true", help="check layered AGENTS context size and duplicate rules")
+    parser.add_argument("--context-budget", type=int, default=32 * 1024)
+    parser.add_argument("--context-file-budget", type=int, default=16 * 1024)
+    parser.add_argument("--pr-body-file", type=Path, help="validate a pull-request body against the metadata contract")
+    parser.add_argument("--feature-id", help="expected Feature ID for --pr-body-file (FNNN or NNN)")
+    parser.add_argument("--expected-source-sha", help="expected PR head SHA for --pr-body-file")
+    parser.add_argument("--reserve-feature-id", action="store_true", help="atomically reserve the next Feature ID")
+    parser.add_argument("--requested-feature-id", help="reserve this exact Feature ID instead of allocating the next one")
+    parser.add_argument("--feature-id-ledger", type=Path, help="shared reservation ledger path")
+    parser.add_argument("--owner", help="human or agent owner recorded in a reservation")
+    parser.add_argument("--umbrella-issue", help="optional umbrella issue recorded in a reservation")
+    parser.add_argument("--branch", help="optional branch recorded in a reservation")
     args = parser.parse_args(argv)
     if args.self_test:
         return self_test()
     root = args.root.resolve()
     package_root = args.package_root.resolve() if args.package_root else None
+    if args.reserve_feature_id:
+        try:
+            number = reserve_feature_id(
+                root, ledger=args.feature_id_ledger, requested=args.requested_feature_id,
+                owner=args.owner, issue=args.umbrella_issue, branch=args.branch,
+            )
+        except (OSError, RuntimeError, ValueError) as exc:
+            print(f"harness-check: ERROR: {exc}", file=sys.stderr)
+            return 1
+        print(f"Feature ID: F{number}")
+        return 0
+    if args.pr_body_file is not None or args.feature_id is not None or args.expected_source_sha is not None:
+        if args.pr_body_file is None or args.feature_id is None or args.expected_source_sha is None:
+            print("harness-check: ERROR: --pr-body-file, --feature-id and --expected-source-sha must be provided together", file=sys.stderr)
+            return 1
+        try:
+            body = args.pr_body_file.resolve().read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"harness-check: ERROR: cannot read PR body: {exc}", file=sys.stderr)
+            return 1
+        errors = pr_metadata(body, args.feature_id, expected_source_sha=args.expected_source_sha)
+        if errors:
+            for error in errors:
+                print(f"harness-check: ERROR: {error}", file=sys.stderr)
+            return 1
+        print("harness-check: PR metadata OK")
+        return 0
     # A package-root scan is intentionally runnable from the standalone
     # harness checkout, which has no consumer project's .specify pointer.
     # Keep context/fragment checks when a caller explicitly supplies a
     # separate consumer root or a spec.
     scan_only = package_root is not None and args.spec is None and root == package_root
     errors = [] if scan_only else context(root) + fragments(root)
+    if args.context_check:
+        errors += context_budget(root, max_bytes=args.context_budget, max_file_bytes=args.context_file_budget)
     if args.spec:
         errors += legacy(args.spec.resolve())
     if args.package_root:

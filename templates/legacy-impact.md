@@ -13,7 +13,7 @@ requires all fields below and a separate retirement task:
 ```text
 Owner: <person or team>
 Expiry: <YYYY-MM-DD>
-Removal trigger: <observable condition>
+Trigger: <observable condition>
 Risk: <bounded risk>
 Validation: <proof command or scenario>
 Retirement task: <issue or task id>

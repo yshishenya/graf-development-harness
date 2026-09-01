@@ -14,8 +14,11 @@ metadata or agent governance.
    `.specify/feature.json`; never infer a feature from timestamps or the newest
    directory. Validate the pointer before editing.
 3. Keep one worktree, branch, owner, changelog fragment and evidence namespace
-   per Feature ID. Reserve the ID against local refs and the GitHub tracker
-   before creating a spec.
+   per Feature ID. Reserve the ID before creating a spec, using the portable
+   allocator with a ledger shared by parallel worktrees:
+   `./bin/harness-check --reserve-feature-id --owner <name> --feature-id-ledger
+   <shared-path>`. Record the resulting ID in the GitHub tracker; a local
+   ledger is not a substitute for an umbrella issue.
 4. Use the repository's risk lane and Spec Kit order. For significant work,
    complete specify → clarify → plan → checklist → tasks → analyze →
    taskstoissues → implement → converge → validation.
@@ -24,7 +27,12 @@ metadata or agent governance.
    stale, interrupted or skipped-gate evidence cannot authorize release.
    The exact-SHA gate requires a clean worktree. A dirty diagnostic must be
    explicitly opted into and recorded as `ambiguous`; it never authorizes
-   merge or release.
+   merge or release. For a release train, require a synthetic merge SHA, link
+   the candidate with the consumer adapter's `--train` operation, attest the
+   single Full CI receipt with its `train-attest` operation, and pass only the
+   resulting `*-go.json` train to the adapter's `decide --train` operation.
+   The portable `harness-check` CLI validates the contracts; it does not
+   invent product-specific freeze, CI orchestration or deployment commands.
 6. Test a selected SHA in the consumer's single Dev target with a lock,
    atomic manifest, smoke checks and reversible promotion. Keep production
    origins, credentials and data outside the Dev adapter.
@@ -34,6 +42,12 @@ metadata or agent governance.
 8. Do not commit, publish, deploy or close tracker items until the consumer's
    required reviewer and approval gates are complete. Preserve metadata-only
    evidence and never write secrets or private user data into it.
+
+The consumer CI should run `--pr-body-file <body> --feature-id <FNNN>
+--expected-source-sha <PR head SHA>` on every pull request and `--context-check`
+on the repository root. This keeps PR
+metadata machine-checkable and prevents stable instructions from growing past
+the default 32 KiB always-on context budget.
 
 ## Context handoff
 

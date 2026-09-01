@@ -15,6 +15,7 @@ concurrency:
 
 env:
   PYTHONDONTWRITEBYTECODE: "1"
+  EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
 jobs:
   self-test:
@@ -43,6 +44,91 @@ jobs:
       - name: Scan package before build artifacts exist
         run: ./bin/harness-check --package-root .
 
+      - name: Check bounded layered agent context
+        run: ./bin/harness-check --context-check . --package-root .
+
+      - name: Check pull-request metadata validator CLI
+        run: |
+          body="$RUNNER_TEMP/pr-body.md"
+          cat > "$body" <<'EOF'
+          ## Feature identity
+          - Feature ID: `F216`
+          - Umbrella issue: `#6090`
+          - Spec task IDs: `T042`
+
+          ## Как проверено
+          - `ci --fast`: passed
+          - Exact source SHA: EXPECTED_SOURCE_SHA_PLACEHOLDER
+
+          ## Risk / validation lane
+          - Lane: significant-feature
+
+          ## Issues
+          - Refs #6090
+
+          ## Legacy Impact
+          - Classification: `untouched`
+
+          ## Перед merge
+          - evidence recorded
+          EOF
+          sed -i "s/EXPECTED_SOURCE_SHA_PLACEHOLDER/$EXPECTED_SOURCE_SHA/" "$body"
+          ./bin/harness-check --pr-body-file "$body" --feature-id F216 --expected-source-sha "$EXPECTED_SOURCE_SHA"
+
       - name: Verify runtime version
         run: |
           test "$(PYTHONPATH=src python -c 'import dev_harness; print(dev_harness.__version__)')" = "$(cat VERSION)"
+
+      - name: Build and inspect publish artifacts
+        run: |
+          python -m pip install --disable-pip-version-check --quiet build
+          out="$(mktemp -d)"
+          python -m build --outdir "$out"
+          OUT_DIR="$out" python - <<'PY'
+          import os
+          import tarfile
+          import zipfile
+          from pathlib import Path
+
+          out = Path(os.environ["OUT_DIR"])
+          files = [path for path in out.iterdir() if path.suffix in {".whl", ".gz"}]
+          assert len(files) == 2, files
+          expected = {
+              "AGENTS.md",
+              "VERSION",
+              "schemas/ci-receipt.schema.json",
+              "schemas/event-identity.schema.json",
+              "schemas/feature-id-reservation.schema.json",
+              "schemas/release-train.schema.json",
+              "templates/release-train.json",
+              "templates/GOALS.md",
+              "templates/PROMPTS.md",
+              "templates/build-phase.md",
+              "templates/phase-context.md",
+              "templates/build-log.md",
+              "skills/development-process/SKILL.md",
+              "bin/harness-check",
+          }
+          sdist = next(path for path in files if path.suffix == ".gz")
+          with tarfile.open(sdist) as archive:
+              names = {name.split("/", 1)[1] for name in archive.getnames() if "/" in name}
+          assert expected <= names, sorted(expected - names)
+          wheel = next(path for path in files if path.suffix == ".whl")
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+          version = Path("VERSION").read_text(encoding="utf-8").strip()
+          wheel_expected = {
+              f"development_process_harness-{version}.data/data/share/development-process-harness/AGENTS.md",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/schemas/feature-id-reservation.schema.json",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/schemas/release-train.schema.json",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/templates/release-train.json",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/templates/GOALS.md",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/templates/PROMPTS.md",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/templates/build-phase.md",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/templates/phase-context.md",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/templates/build-log.md",
+              f"development_process_harness-{version}.data/data/share/development-process-harness/skills/development-process/SKILL.md",
+          }
+          assert wheel_expected <= names, sorted(wheel_expected - names)
+          print("artifact-content: OK")
+          PY

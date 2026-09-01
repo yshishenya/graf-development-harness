@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +7,17 @@ name = "development-process-harness"
 version = "0.1.13"
 description = "Portable dependency-free governance validators"
 requires-python = ">=3.9"
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 
 [project.scripts]
 harness-check = "dev_harness.validators:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/development-process-harness/schemas" = ["schemas/*.json"]
+"share/development-process-harness/templates" = ["templates/*"]
+"share/development-process-harness/skills/development-process" = ["skills/development-process/*"]
+"share/development-process-harness" = ["AGENTS.md", "PLANS.md", "VERSION"]

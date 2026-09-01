@@ -1,0 +1,10 @@
+include AGENTS.md
+include PLANS.md
+include VERSION
+include LICENSE
+include README.md
+recursive-include schemas *.json
+recursive-include templates *
+recursive-include skills *
+recursive-include sample *
+recursive-include bin *

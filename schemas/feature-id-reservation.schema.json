@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:development-process-harness:feature-id-reservation:v1",
+  "title": "Feature ID reservation ledger",
+  "description": "Append-only metadata used to allocate collision-free Feature IDs across worktrees.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "reservations"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "reservations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feature_id", "owner", "created_at"],
+        "properties": {
+          "feature_id": {"type": "string", "pattern": "^[0-9]{3,}$"},
+          "owner": {"type": "string", "minLength": 1},
+          "issue": {"type": ["string", "null"]},
+          "branch": {"type": ["string", "null"]},
+          "created_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    }
+  }
+}
