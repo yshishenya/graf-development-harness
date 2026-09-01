@@ -71,13 +71,17 @@ contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.11`;
-`v0.1.10` remains the rollback ref. A consumer must pin the immutable release
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.13`;
+`v0.1.12` remains the rollback ref. A consumer must pin the immutable release
 and update its migration notes and rollback ref together.
 
-Migration from `v0.1.10` to `v0.1.11` fixes the runtime package-version
-declaration so clean installs report the same version as `VERSION` and
-`pyproject.toml`. The portable feature-context schema and copyable templates
-were introduced in `v0.1.10`. Consumers should run the same self-test and
-package scan after updating their pinned ref. Rollback is the immutable
-`v0.1.10` ref.
+Migration from `v0.1.12` to `v0.1.13` validates schema version and risk lane,
+accepts arbitrary RFC3339 fractional-second precision, and requires
+`known_limitations` in changelog fragments. Migration from `v0.1.11` to
+`v0.1.12` made CI-evidence credential detection fail closed for every bearer
+token, including short tokens and the common `Authorization: Bearer ...` form.
+Migration from `v0.1.10` to `v0.1.11`
+fixed the runtime package-version declaration. The portable feature-context
+schema and copyable templates were introduced in `v0.1.10`. Consumers should
+run the same self-test and package scan after updating their pinned ref.
+Rollback is the immutable `v0.1.12` ref.

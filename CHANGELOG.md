@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.1.13] - 2026-09-01
+
+### Исправлено
+
+- Контекст feature теперь проверяет `schema_version` и допустимый `risk_lane`.
+- CI timestamp принимает RFC3339 precision любой длины, а changelog-фрагменты
+  требуют явный `known_limitations`.
+
+### Совместимость
+
+- Python 3.9+; validator API обратно совместим с `v0.1.12`.
+- Откат: immutable `v0.1.12`.
+
+### Проверки
+
+- Self-test и package-safety scan — PASS.
+
 ## [0.1.11] - 2026-08-31
 
 ### Исправлено
