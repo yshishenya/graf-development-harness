@@ -50,7 +50,7 @@ jobs:
       - name: Check pull-request metadata validator CLI
         run: |
           body="$RUNNER_TEMP/pr-body.md"
-          cat > "$body" <<'EOF'
+          cat > "$body" <<EOF
           ## Feature identity
           - Feature ID: `F216`
           - Umbrella issue: `#6090`
