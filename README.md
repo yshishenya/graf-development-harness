@@ -91,7 +91,14 @@ The portable CI contract API is dependency-free as well:
 ```python
 from dev_harness.ci_contracts import ci_receipt, release_train, resolve_event_identity
 
-identity = resolve_event_identity(event_payload, "merge_group")
+# Native GitHub merge_group payloads can omit the group id and PR mapping.
+# Supply those values from the trusted adapter instead of guessing them.
+identity = resolve_event_identity(
+    event_payload,
+    "merge_group",
+    merge_group_id=trusted_group_id,
+    pull_request_numbers=trusted_pr_numbers,
+)
 assert ci_receipt(receipt_payload) == []
 assert release_train(train_payload) == []
 ```
@@ -102,6 +109,12 @@ the feature ID, umbrella issue, task ID, SHA, issue linkage, Legacy Impact and
 required PR sections. JSON Schemas document the structural contract; these
 Python validators perform the cross-field checks that JSON Schema cannot
 express.
+
+Release-train receipts are lineage-bound: every declared PR and merge group
+must have one matching receipt. PR receipts target `source_sha`; merge-group
+and authoritative receipts target `synthetic_merge_sha` when present, otherwise
+authoritative CI targets `post_merge_sha` or `source_sha`. An `approved` train
+must include a passed authoritative receipt.
 
 The package scan is intentionally run before building or installing the
 package: generated `build/`, `*.egg-info/` and bytecode files are not
