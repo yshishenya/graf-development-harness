@@ -15,8 +15,24 @@
     "included_prs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "integer", "minimum": 1}},
     "feature_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:F)?[0-9]{3,}$"}},
     "merge_group_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9._:-]{1,256}$"}},
-    "pr_receipts": {"type": "array", "items": {"$ref": "ci-receipt.schema.json"}},
-    "merge_group_receipts": {"type": "array", "items": {"$ref": "ci-receipt.schema.json"}},
+    "pr_receipts": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {"$ref": "ci-receipt.schema.json"},
+          {"properties": {"event_name": {"const": "pull_request"}, "pull_request_numbers": {"minItems": 1, "maxItems": 1}}}
+        ]
+      }
+    },
+    "merge_group_receipts": {
+      "type": "array",
+      "items": {
+        "allOf": [
+          {"$ref": "ci-receipt.schema.json"},
+          {"properties": {"event_name": {"const": "merge_group"}, "merge_group_id": {"type": "string"}}}
+        ]
+      }
+    },
     "changelog_digest": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"},
     "authoritative_full_ci_receipt": {"oneOf": [{"$ref": "ci-receipt.schema.json"}, {"type": "null"}]},
     "decision": {"type": "string", "enum": ["pending", "approved", "rejected", "blocked"]},

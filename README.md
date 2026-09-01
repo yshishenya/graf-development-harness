@@ -39,7 +39,8 @@ provider and production gates remain in this repository's adapter.
 
 `src/dev_harness` and `bin/harness-check` are dependency-free and contain no
 product runtime or private product rules. From this directory, install in
-another repository with `python -m pip install .` or run the CLI directly. The
+another repository with `python -m pip install .`, or use the executable
+source-tree launcher `./bin/harness-check` without installing the package. The
 sample project under `sample/` is the publish smoke fixture. The following
 commands are the source-tree self-check and must work from a clean checkout:
 

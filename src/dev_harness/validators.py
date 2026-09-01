@@ -200,7 +200,17 @@ def _read_reservation_ledger(path: Path) -> tuple[dict[str, Any], list[str]]:
     errors: list[str] = []
     seen: set[str] = set()
     for index, row in enumerate(data["reservations"]):
-        raw_id = row.get("feature_id") if isinstance(row, dict) else None
+        if not isinstance(row, dict):
+            errors.append(f"reservation {index} must be an object")
+            continue
+        allowed = {"feature_id", "owner", "issue", "branch", "created_at"}
+        extra = set(row) - allowed
+        if extra:
+            errors.append(f"reservation {index} has unsupported fields: {', '.join(sorted(extra))}")
+        missing = {key for key in ("feature_id", "owner", "created_at") if key not in row}
+        if missing:
+            errors.append(f"reservation {index} is missing required fields: {', '.join(sorted(missing))}")
+        raw_id = row.get("feature_id")
         number = _feature_number(raw_id) if isinstance(raw_id, str) else None
         if number is None or not re.fullmatch(r"\d{3,}", raw_id or ""):
             errors.append(f"reservation {index} has an invalid feature_id")
@@ -208,6 +218,23 @@ def _read_reservation_ledger(path: Path) -> tuple[dict[str, Any], list[str]]:
             errors.append(f"reservation {index} duplicates feature_id {number}")
         else:
             seen.add(number)
+        owner_value = row.get("owner")
+        if not isinstance(owner_value, str) or not owner_value.strip():
+            errors.append(f"reservation {index} has an invalid owner")
+        for optional_key in ("issue", "branch"):
+            optional_value = row.get(optional_key)
+            if optional_value is not None and (not isinstance(optional_value, str) or not optional_value.strip()):
+                errors.append(f"reservation {index} has an invalid {optional_key}")
+        created_at = row.get("created_at")
+        if not isinstance(created_at, str) or not _UTC_TIMESTAMP_RE.fullmatch(created_at):
+            errors.append(f"reservation {index} has an invalid created_at")
+        else:
+            try:
+                parsed = dt.datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except ValueError:
+                parsed = None
+            if parsed is None or parsed.tzinfo is None or parsed.utcoffset() != dt.timedelta(0):
+                errors.append(f"reservation {index} has an invalid created_at")
     return data, errors
 
 
@@ -319,14 +346,14 @@ def legacy(spec: Path) -> list[str]:
     if len(classifications) != 1:
         return [f"{spec}: Legacy Impact classification is invalid"]
     if classifications[0].lower() == "retain-with-exception":
-        for token in ("owner", "expiry", "trigger", "retirement task"):
+        for token in ("owner", "expiry", "trigger", "risk", "validation", "retirement task"):
             field = re.search(
                 rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(token)}(?:\*\*)?[ \t]*:[ \t]*(\S.*)$",
                 section,
                 re.IGNORECASE | re.MULTILINE,
             )
             if not field:
-                return [f"{spec}: compatibility exception needs owner, expiry, trigger and retirement task"]
+                return [f"{spec}: compatibility exception needs owner, expiry, trigger, risk, validation and retirement task"]
             if token == "expiry":
                 value = field.group(1).strip().strip("`'\"")
                 try:
@@ -756,6 +783,7 @@ def self_test() -> int:
             "# Example\n\n## Legacy Impact\n\n"
             "Classification: retain-with-exception\n"
             "owner: platform\nexpiry: 2099-12-31\ntrigger: migration complete\n"
+            "risk: bounded compatibility risk\nvalidation: smoke test\n"
             "retirement task: T999\n",
             encoding="utf-8",
         )
@@ -764,6 +792,7 @@ def self_test() -> int:
             "# Example\n\n## Legacy Impact\n\n"
             "Classification: retain-with-exception\n"
             "owner: platform\nexpiry: yesterday\ntrigger: migration complete\n"
+            "risk: bounded compatibility risk\nvalidation: smoke test\n"
             "retirement task: T999\n",
             encoding="utf-8",
         )
@@ -805,6 +834,17 @@ def self_test() -> int:
             assert "already used" in str(exc)
         else:
             raise AssertionError("a duplicate Feature ID reservation must fail")
+        malformed_ledger = root / "coordinator" / "malformed.json"
+        malformed_ledger.write_text(
+            json.dumps({"schema_version": 1, "reservations": [{"feature_id": "004"}]}),
+            encoding="utf-8",
+        )
+        try:
+            reserve_feature_id(root, ledger=malformed_ledger, owner="agent-d")
+        except ValueError as exc:
+            assert "missing required fields" in str(exc)
+        else:
+            raise AssertionError("incomplete reservation rows must fail closed")
 
         pr_body = root / "pr-body.md"
         pr_body.write_text(good_pr, encoding="utf-8")
