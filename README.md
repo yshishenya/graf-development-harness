@@ -130,9 +130,11 @@ contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
 The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.13`;
-`v0.1.12` remains the rollback ref. A consumer must pin the immutable release
-and update its migration notes and rollback ref together.
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.12`.
+This branch prepares the next candidate `v0.1.13`; it is not a public release
+until the PR is merged and the immutable tag and GitHub Release exist.
+Consumers must keep pinning the published immutable release and update its
+migration notes and rollback ref together.
 
 Migration from `v0.1.12` to `v0.1.13` adds generic event identity, metadata-only
 CI receipts, release-train lineage, atomic Feature ID allocation, bounded
