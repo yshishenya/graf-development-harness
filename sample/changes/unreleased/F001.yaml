@@ -6,3 +6,4 @@ issue: 1
 tasks: [T001]
 compatibility: "Только пример; продуктовый runtime не меняется."
 release_notes: "Добавить запись в release train."
+known_limitations: "Только учебный пример; production-проверки не выполняются."
