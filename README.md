@@ -80,8 +80,12 @@ Validate a PR body in CI with the same dependency-free CLI:
 
 ```sh
 ./bin/harness-check --pr-body-file "$RUNNER_TEMP/pr-body.md" --feature-id F230 \
-  --expected-source-sha "$GITHUB_SHA"
+  --expected-source-sha "$PR_HEAD_SHA"
 ```
+
+In a `pull_request` workflow set `PR_HEAD_SHA` from
+`${{ github.event.pull_request.head.sha }}`; `GITHUB_SHA` is the temporary
+merge ref and is not the PR source revision.
 
 `--context-check` checks the layered `AGENTS.md` / `AGENTS.override.md` files
 against the 32 KiB always-on budget and reports duplicated stable rules. Keep
@@ -113,11 +117,13 @@ Python validators perform the cross-field checks that JSON Schema cannot
 express.
 
 Release-train receipts are lineage-bound: every declared PR and merge group
-must have one matching receipt. PR receipts target `source_sha`; merge-group
-and authoritative receipts target `synthetic_merge_sha` when present, otherwise
-authoritative CI targets `post_merge_sha` or `source_sha`. An `approved` train
-must include a synthetic merge SHA, passed lineage receipts and a passed
-authoritative receipt.
+must have one matching receipt. `pr_target_shas` records the exact head SHA for
+each included PR. PR receipts target their declared PR SHA; merge-group
+receipts target `synthetic_merge_sha` and cover exactly the train PR set.
+Authoritative CI is a passed `workflow_dispatch` receipt with `lane=full` and
+`authoritative_full=true`, targeting the synthetic merge SHA. An `approved`
+train must include a synthetic merge SHA, passed/clean lineage receipts and
+that one authoritative full receipt.
 
 The package scan is intentionally run before building or installing the
 package: generated `build/`, `*.egg-info/` and bytecode files are not

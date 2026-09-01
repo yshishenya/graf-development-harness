@@ -111,47 +111,74 @@ def context_budget(root: Path, *, max_bytes: int = 32 * 1024, max_file_bytes: in
     """
     if max_bytes < 1 or max_file_bytes < 1:
         return ["context budgets must be positive"]
-    paths: list[Path] = []
-    for base, directories, files in os.walk(root):
+    root = root.resolve()
+    directories_seen: list[Path] = []
+    for base, directories, _files in os.walk(root):
         directories[:] = [name for name in directories if name not in _CONTEXT_EXCLUDED_DIRS]
-        active_names = set(files)
-        if "AGENTS.override.md" in active_names:
-            active_names.discard("AGENTS.md")
-        paths.extend(Path(base) / name for name in active_names if name in _INSTRUCTION_NAMES)
-    paths.sort()
+        directories_seen.append(Path(base).resolve())
+    directories_seen = sorted(set(directories_seen))
+    selected: dict[Path, Path] = {}
+    for directory in directories_seen:
+        override = directory / "AGENTS.override.md"
+        regular = directory / "AGENTS.md"
+        if override.is_file():
+            selected[directory] = override
+        elif regular.is_file():
+            selected[directory] = regular
+    paths = sorted(set(selected.values()))
     errors: list[str] = []
-    total = 0
-    rules: dict[str, Path] = {}
+    sizes: dict[Path, int] = {}
+    contents: dict[Path, str] = {}
     for path in paths:
         try:
             size = path.stat().st_size
         except OSError as exc:
             errors.append(f"cannot read instruction file {path}: {exc}")
             continue
-        total += size
+        sizes[path] = size
         if size > max_file_bytes:
             errors.append(f"instruction file exceeds {max_file_bytes} bytes: {path} ({size})")
             continue
         try:
             raw = path.read_bytes()
-            text = raw.decode("utf-8")
+            contents[path] = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             errors.append(f"cannot read instruction file {path}: {exc}")
             continue
-        for line in text.splitlines():
-            normalized = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", line)
-            normalized = re.sub(r"\s+", " ", normalized).strip().lower()
-            if len(normalized) < 24 or normalized.startswith(("#", "```")):
-                continue
-            if not normalized.startswith(_STABLE_RULE_PREFIXES):
-                continue
-            previous = rules.get(normalized)
-            if previous is not None:
-                errors.append(f"duplicated stable instruction between {previous} and {path}: {normalized}")
-            else:
-                rules[normalized] = path
-    if total > max_bytes:
-        errors.append(f"layered AGENTS context exceeds {max_bytes} bytes: {total}")
+    reported_duplicates: set[tuple[Path, Path, str]] = set()
+    max_chain = 0
+    for directory in directories_seen:
+        chain: list[Path] = []
+        current = directory
+        while True:
+            if current in selected:
+                chain.append(selected[current])
+            if current == root:
+                break
+            if root not in current.parents:
+                break
+            current = current.parent
+        chain.reverse()
+        max_chain = max(max_chain, sum(sizes.get(path, 0) for path in chain))
+        rules: dict[str, Path] = {}
+        for path in chain:
+            for line in contents.get(path, "").splitlines():
+                normalized = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+)", "", line)
+                normalized = re.sub(r"\s+", " ", normalized).strip().lower()
+                if len(normalized) < 24 or normalized.startswith(("#", "```")):
+                    continue
+                if not normalized.startswith(_STABLE_RULE_PREFIXES):
+                    continue
+                previous = rules.get(normalized)
+                if previous is not None and previous != path:
+                    key = (previous, path, normalized)
+                    if key not in reported_duplicates:
+                        errors.append(f"duplicated stable instruction between {previous} and {path}: {normalized}")
+                        reported_duplicates.add(key)
+                else:
+                    rules[normalized] = path
+    if max_chain > max_bytes:
+        errors.append(f"applicable AGENTS context exceeds {max_bytes} bytes: {max_chain}")
     return errors
 
 
@@ -180,12 +207,11 @@ def _feature_ids_in_tree(root: Path) -> set[str]:
     if pointer.is_file():
         try:
             data = json.loads(pointer.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("feature_id"), str):
-                number = _feature_number(data["feature_id"])
-                if number:
-                    found.add(number)
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"cannot read active Feature ID pointer: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("feature_id"), str) or _feature_number(data["feature_id"]) is None:
+            raise RuntimeError("active Feature ID pointer must be a JSON object")
+        found.add(_feature_number(data["feature_id"]))
     try:
         refs = subprocess.check_output(
             ["git", "-C", str(root), "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes", "refs/tags"],
@@ -695,10 +721,11 @@ def package_safety(package_root: Path) -> list[str]:
         re.IGNORECASE,
     )
     credential_assignment = re.compile(
-        r"(?:\b(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url)\s*[:=]\s*['\"]"
-        r"|\bauthorization\s*:\s*bearer\s+['\"]?)"
+        r"(?:^\s*(?:[-*]\s*)?(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url)\s*[:=]\s*['\"]?"
+        r"|^\s*authorization\s*:\s*bearer\s+['\"]?)"
+        r"(?!response\b|request\b|value\b|result\b|none\b|null\b|true\b|false\b)"
         r"[A-Za-z0-9][A-Za-z0-9_./+=:-]{7,}",
-        re.IGNORECASE,
+        re.IGNORECASE | re.MULTILINE,
     )
     for path in sorted(package_root.rglob("*")):
         relative = path.relative_to(package_root)
@@ -838,6 +865,10 @@ def self_test() -> int:
             "pass" + "word = \"" + "x" * 24 + "\"\n", encoding="utf-8"
         )
         assert package_safety(package)
+        unquoted_package = root / "unquoted-package"
+        unquoted_package.mkdir()
+        (unquoted_package / "config.yaml").write_text("api_key: RealCredential123456\n", encoding="utf-8")
+        assert package_safety(unquoted_package)
         build = package / "build"
         build.mkdir()
         (build / "generated.py").write_text("generated = True\n", encoding="utf-8")
@@ -949,9 +980,9 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         print(f"Feature ID: F{number}")
         return 0
-    if args.pr_body_file is not None or args.feature_id is not None:
-        if args.pr_body_file is None or args.feature_id is None:
-            print("harness-check: ERROR: --pr-body-file and --feature-id must be provided together", file=sys.stderr)
+    if args.pr_body_file is not None or args.feature_id is not None or args.expected_source_sha is not None:
+        if args.pr_body_file is None or args.feature_id is None or args.expected_source_sha is None:
+            print("harness-check: ERROR: --pr-body-file, --feature-id and --expected-source-sha must be provided together", file=sys.stderr)
             return 1
         try:
             body = args.pr_body_file.resolve().read_text(encoding="utf-8")

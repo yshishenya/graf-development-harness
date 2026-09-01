@@ -6,6 +6,7 @@
   "synthetic_merge_sha": null,
   "post_merge_sha": null,
   "included_prs": [1],
+  "pr_target_shas": {"1": "0000000000000000000000000000000000000000"},
   "feature_ids": ["001"],
   "merge_group_ids": [],
   "pr_receipts": [],

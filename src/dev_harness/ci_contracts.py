@@ -160,10 +160,14 @@ def ci_receipt(data: Any) -> list[str]:
                 "workflow_url", "target_sha", "base_sha", "pull_request_numbers", "merge_group_id",
                 "requested_sha", "observed_sha_start", "observed_sha_end", "final_cleanliness",
                 "local_evidence_digest", "started_at", "finished_at")
-    allowed = set(required) | {"reason", "final_cleanliness_reason", "conclusion", "concurrency_key", "cancellation_state", "supersession_state"}
+    allowed = set(required) | {
+        "reason", "final_cleanliness_reason", "conclusion", "concurrency_key",
+        "cancellation_state", "supersession_state", "lane", "candidate_id",
+        "authoritative_full",
+    }
     errors.extend(f"unsupported receipt field: {key}" for key in sorted(set(data) - allowed))
     errors.extend(f"missing {key}" for key in required if key not in data)
-    if data.get("schema_version") != 1:
+    if isinstance(data.get("schema_version"), bool) or data.get("schema_version") != 1:
         errors.append("schema_version must be 1")
     status, event = data.get("status"), data.get("event_name")
     if not isinstance(status, str) or status not in _STATUSES:
@@ -230,6 +234,15 @@ def ci_receipt(data: Any) -> list[str]:
         errors.append("final_cleanliness_reason must be a non-empty string of at most 512 characters")
     if data.get("conclusion") is not None and data.get("conclusion") != status:
         errors.append("conclusion must match status")
+    lane = data.get("lane")
+    if lane is not None and (not isinstance(lane, str) or lane not in {"scoped", "fast", "full"}):
+        errors.append("lane must be scoped, fast or full")
+    candidate_id = data.get("candidate_id")
+    if candidate_id is not None and (not isinstance(candidate_id, str) or not _KEY.fullmatch(candidate_id)):
+        errors.append("invalid candidate_id")
+    authoritative_full = data.get("authoritative_full")
+    if authoritative_full is not None and not isinstance(authoritative_full, bool):
+        errors.append("authoritative_full must be boolean")
     concurrency = data.get("concurrency_key")
     if concurrency is not None and (not isinstance(concurrency, str) or not _KEY.fullmatch(concurrency)):
         errors.append("invalid concurrency_key")
@@ -284,6 +297,7 @@ def ci_receipt(data: Any) -> list[str]:
             re.search(r"/(?:Users|home|private/var|Volumes)/", value, re.IGNORECASE)
             or ("BEGIN " + "PRIVATE KEY") in value
             or "signed-url" in value.lower()
+            or re.search(r"[?&](?:x-amz-[^=]+|awsaccesskeyid|signature|expires|googleaccessid|security-token|credential|token)\s*=", value, re.IGNORECASE)
             or re.search(r"\b(?:raw[_ -]?audio|raw[_ -]?transcript|transcript[_ -]?text|private[_ -]?meeting(?: content)?)\b", value, re.IGNORECASE)
             or re.search(r"\b(?:api[_-]?key|secret|password|token|cookie)\s*[:=]\s*[^\s,;]{1,}", value, re.IGNORECASE)
             or re.search(r"(?:authorization\s*:\s*)?bearer\s+[^\s,;]{1,}", value, re.IGNORECASE)
@@ -298,13 +312,13 @@ def release_train(data: Any) -> list[str]:
     if not isinstance(data, dict):
         return ["release train must be a JSON object"]
     required = ("schema_version", "train_id", "source_sha", "base_sha", "synthetic_merge_sha", "post_merge_sha",
-                "included_prs", "feature_ids", "merge_group_ids", "pr_receipts",
+                "included_prs", "pr_target_shas", "feature_ids", "merge_group_ids", "pr_receipts",
                 "merge_group_receipts", "changelog_digest", "authoritative_full_ci_receipt",
                 "decision", "rollback_target")
     allowed = set(required)
     errors = [f"unsupported release train field: {key}" for key in sorted(set(data) - allowed)]
     errors.extend(f"missing {key}" for key in required if key not in data)
-    if data.get("schema_version") != 1:
+    if isinstance(data.get("schema_version"), bool) or data.get("schema_version") != 1:
         errors.append("schema_version must be 1")
     train_id = data.get("train_id")
     if not isinstance(train_id, str) or not _KEY.fullmatch(train_id):
@@ -314,12 +328,18 @@ def release_train(data: Any) -> list[str]:
     for key, value in (("source_sha", source), ("base_sha", base)):
         if not isinstance(value, str) or not _SHA.fullmatch(value):
             errors.append(f"{key} must be a full 40-character SHA")
+        elif value.lower() == _NULL_SHA:
+            errors.append(f"{key} must not be the all-zero placeholder SHA")
     synthetic = data.get("synthetic_merge_sha")
     if synthetic is not None and (not isinstance(synthetic, str) or not _SHA.fullmatch(synthetic)):
         errors.append("synthetic_merge_sha must be null or a full 40-character SHA")
+    elif synthetic == _NULL_SHA:
+        errors.append("synthetic_merge_sha must not be the all-zero placeholder SHA")
     post_merge = data.get("post_merge_sha")
     if post_merge is not None and (not isinstance(post_merge, str) or not _SHA.fullmatch(post_merge)):
         errors.append("post_merge_sha must be null or a full 40-character SHA")
+    elif post_merge == _NULL_SHA:
+        errors.append("post_merge_sha must not be the all-zero placeholder SHA")
 
     def unique_positive_list(key: str) -> list[int] | None:
         value = data.get(key)
@@ -331,6 +351,18 @@ def release_train(data: Any) -> list[str]:
         return value
 
     included_prs = unique_positive_list("included_prs")
+    pr_target_shas = data.get("pr_target_shas")
+    if not isinstance(pr_target_shas, dict) or not pr_target_shas:
+        errors.append("pr_target_shas must map each included PR number to a SHA")
+        pr_target_shas = None
+    else:
+        for number, target in pr_target_shas.items():
+            if not isinstance(number, str) or not re.fullmatch(r"[1-9]\d*", number):
+                errors.append("pr_target_shas keys must be positive PR numbers")
+            if not isinstance(target, str) or not _SHA.fullmatch(target) or target.lower() == _NULL_SHA:
+                errors.append(f"pr_target_shas[{number!r}] must be a non-placeholder 40-character SHA")
+        if included_prs is not None and set(pr_target_shas) != {str(number) for number in included_prs}:
+            errors.append("pr_target_shas must cover exactly included_prs")
 
     def unique_strings(key: str, pattern: re.Pattern[str], *, non_empty: bool = True) -> list[str] | None:
         value = data.get(key)
@@ -352,7 +384,8 @@ def release_train(data: Any) -> list[str]:
         key: str,
         expected_event: str,
         expected_ids: list[int] | list[str] | None,
-        expected_target: str | None,
+        expected_target: str | dict[str, str] | None,
+        expected_base: str | None,
     ) -> None:
         receipts = data.get(key)
         if not isinstance(receipts, list):
@@ -362,8 +395,11 @@ def release_train(data: Any) -> list[str]:
         for index, receipt in enumerate(receipts):
             receipt_errors = ci_receipt(receipt)
             errors.extend(f"{key}[{index}]: {error}" for error in receipt_errors)
+            receipt_identity: int | str | None = None
             if decision == "approved" and isinstance(receipt, dict) and receipt.get("status") != "passed":
                 errors.append(f"{key}[{index}] must be passed for an approved release train")
+            if decision == "approved" and isinstance(receipt, dict) and receipt.get("final_cleanliness") != "pass":
+                errors.append(f"{key}[{index}] must have final_cleanliness=pass for an approved release train")
             if isinstance(receipt, dict) and receipt.get("event_name") != expected_event:
                 errors.append(f"{key}[{index}] event_name must be {expected_event}")
             if isinstance(receipt, dict) and expected_event == "pull_request":
@@ -374,18 +410,29 @@ def release_train(data: Any) -> list[str]:
                     and isinstance(numbers[0], int)
                     and not isinstance(numbers[0], bool)
                 ):
-                    observed_ids.append(numbers[0])
+                    receipt_identity = numbers[0]
+                    observed_ids.append(receipt_identity)
                 else:
                     errors.append(f"{key}[{index}] must identify exactly one pull request")
             elif isinstance(receipt, dict) and expected_event == "merge_group":
                 group_id = receipt.get("merge_group_id")
                 if isinstance(group_id, str) and _GROUP_ID.fullmatch(group_id):
-                    observed_ids.append(group_id)
+                    receipt_identity = group_id
+                    observed_ids.append(receipt_identity)
                 else:
                     errors.append(f"{key}[{index}] must identify one valid merge group")
-            if isinstance(receipt, dict) and expected_target is not None:
+            receipt_target: str | None = expected_target if isinstance(expected_target, str) else None
+            if expected_event == "pull_request" and receipt_identity is not None and isinstance(expected_target, dict):
+                receipt_target = expected_target.get(str(receipt_identity))
+                if receipt_target is None:
+                    errors.append(f"{key}[{index}] has no declared target SHA for its pull request")
+            if isinstance(receipt, dict) and expected_base is not None:
+                base_value = receipt.get("base_sha")
+                if isinstance(base_value, str) and _SHA.fullmatch(base_value) and base_value.lower() != expected_base.lower():
+                    errors.append(f"{key}[{index}] base_sha must match its release-train base SHA")
+            if isinstance(receipt, dict) and receipt_target is not None:
                 target = receipt.get("target_sha")
-                if isinstance(target, str) and _SHA.fullmatch(target) and target.lower() != expected_target.lower():
+                if isinstance(target, str) and _SHA.fullmatch(target) and target.lower() != receipt_target.lower():
                     errors.append(f"{key}[{index}] target_sha must match its release-train target SHA")
         if expected_ids is not None:
             expected_set = set(expected_ids)
@@ -401,14 +448,30 @@ def release_train(data: Any) -> list[str]:
     synthetic_target = synthetic if isinstance(synthetic, str) and _SHA.fullmatch(synthetic) else None
     post_merge_target = post_merge if isinstance(post_merge, str) and _SHA.fullmatch(post_merge) else None
     authoritative_target = synthetic_target or post_merge_target or source_target
-    validate_lineage("pr_receipts", "pull_request", included_prs, source_target)
-    validate_lineage("merge_group_receipts", "merge_group", merge_group_ids, synthetic_target)
+    validate_lineage("pr_receipts", "pull_request", included_prs, pr_target_shas, base)
+    validate_lineage("merge_group_receipts", "merge_group", merge_group_ids, synthetic_target, base)
+    merge_receipts = data.get("merge_group_receipts")
+    if isinstance(merge_receipts, list) and merge_receipts and included_prs is not None:
+        merged_prs = {
+            number
+            for receipt in merge_receipts if isinstance(receipt, dict)
+            for number in receipt.get("pull_request_numbers", [])
+            if isinstance(number, int) and not isinstance(number, bool)
+        }
+        if merged_prs != set(included_prs):
+            errors.append("merge_group_receipts pull_request_numbers must match included_prs")
     authoritative = data.get("authoritative_full_ci_receipt")
     if authoritative is not None:
         receipt_errors = ci_receipt(authoritative)
         errors.extend(f"authoritative_full_ci_receipt: {error}" for error in receipt_errors)
         if isinstance(authoritative, dict) and authoritative.get("status") != "passed":
             errors.append("authoritative_full_ci_receipt must be passed")
+        if isinstance(authoritative, dict) and authoritative.get("event_name") != "workflow_dispatch":
+            errors.append("authoritative_full_ci_receipt must come from workflow_dispatch")
+        if isinstance(authoritative, dict) and authoritative.get("lane") != "full":
+            errors.append("authoritative_full_ci_receipt must declare lane=full")
+        if isinstance(authoritative, dict) and authoritative.get("authoritative_full") is not True:
+            errors.append("authoritative_full_ci_receipt must declare authoritative_full=true")
         if isinstance(authoritative, dict) and authoritative_target is not None:
             target = authoritative.get("target_sha")
             if isinstance(target, str) and _SHA.fullmatch(target) and target.lower() != authoritative_target.lower():
@@ -416,6 +479,8 @@ def release_train(data: Any) -> list[str]:
     digest = data.get("changelog_digest")
     if not isinstance(digest, str) or not _DIGEST.fullmatch(digest):
         errors.append("changelog_digest must be sha256:<64 hex>")
+    elif digest.lower() == "sha256:" + ("0" * 64):
+        errors.append("changelog_digest must not be the all-zero placeholder digest")
     if not isinstance(decision, str) or decision not in _DECISIONS:
         errors.append("invalid decision")
     if decision == "approved" and not isinstance(authoritative, dict):
@@ -462,6 +527,8 @@ def self_test() -> None:
         "concurrency_key": "pr-1",
     }
     assert ci_receipt(good) == []
+    assert ci_receipt({**good, "schema_version": True})
+    assert ci_receipt({**good, "workflow_url": "https://example.test/run?X-Amz-Signature=credential"})
     assert ci_receipt({**good, "event_name": {"malformed": True}})
     assert ci_receipt({**good, "target_sha": _NULL_SHA})
     assert ci_receipt({**good, "local_evidence_digest": "sha256:" + ("0" * 64)})
@@ -471,7 +538,7 @@ def self_test() -> None:
     assert ci_receipt({**good, "supersession_state": "superseded"})
     train = {
         "schema_version": 1, "train_id": "train-example", "source_sha": sha, "base_sha": "b" * 40,
-        "synthetic_merge_sha": None, "post_merge_sha": None, "included_prs": [1], "feature_ids": ["001"],
+        "synthetic_merge_sha": None, "post_merge_sha": None, "included_prs": [1], "pr_target_shas": {"1": sha}, "feature_ids": ["001"],
         "merge_group_ids": [], "pr_receipts": [good], "merge_group_receipts": [],
         "changelog_digest": "sha256:" + "c" * 64, "authoritative_full_ci_receipt": None,
         "decision": "pending", "rollback_target": "previous-successful-release",
@@ -483,8 +550,9 @@ def self_test() -> None:
     two_pr_train = {
         **train,
         "included_prs": [1, 2],
+        "pr_target_shas": {"1": sha, "2": "d" * 40},
         "feature_ids": ["001"],
-        "pr_receipts": [good, {**good, "pull_request_numbers": [2], "concurrency_key": "pr-2"}],
+        "pr_receipts": [good, {**good, "target_sha": "d" * 40, "requested_sha": "d" * 40, "observed_sha_start": "d" * 40, "observed_sha_end": "d" * 40, "pull_request_numbers": [2], "concurrency_key": "pr-2"}],
     }
     assert release_train(two_pr_train) == []
     synthetic = "c" * 40
@@ -495,7 +563,7 @@ def self_test() -> None:
         "requested_sha": synthetic,
         "observed_sha_start": synthetic,
         "observed_sha_end": synthetic,
-        "pull_request_numbers": [7],
+        "pull_request_numbers": [1],
         "merge_group_id": "mg-1",
         "concurrency_key": "merge-group-mg-1",
     }
@@ -510,6 +578,9 @@ def self_test() -> None:
         "pull_request_numbers": [],
         "merge_group_id": None,
         "concurrency_key": "manual-" + synthetic,
+        "lane": "full",
+        "authoritative_full": True,
+        "candidate_id": "rc-example",
     }
     synthetic_train = {
         **train,
@@ -521,6 +592,10 @@ def self_test() -> None:
         "decision": "approved",
     }
     assert release_train(synthetic_train) == []
+    assert release_train({**synthetic_train, "merge_group_receipts": [{**merge_receipt, "pull_request_numbers": [7]}]})
+    assert release_train({**synthetic_train, "authoritative_full_ci_receipt": {**authoritative, "lane": "fast"}})
+    assert release_train({**synthetic_train, "authoritative_full_ci_receipt": {**authoritative, "authoritative_full": False}})
+    assert release_train({**synthetic_train, "changelog_digest": "sha256:" + ("0" * 64)})
     assert release_train({**synthetic_train, "merge_group_receipts": []})
     assert release_train({**synthetic_train, "authoritative_full_ci_receipt": {**authoritative, "target_sha": sha}})
     assert release_train({**synthetic_train, "pr_receipts": [{**good, "status": "failed", "reason": "test failure"}]})

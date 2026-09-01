@@ -29,11 +29,14 @@
     "conclusion": {"type": "string", "enum": ["passed", "failed", "cancelled", "superseded", "stale", "ambiguous"]},
     "concurrency_key": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$"},
     "cancellation_state": {"type": "string", "enum": ["none", "cancelled"]},
-    "supersession_state": {"type": "string", "enum": ["none", "superseded"]}
+    "supersession_state": {"type": "string", "enum": ["none", "superseded"]},
+    "lane": {"type": "string", "enum": ["scoped", "fast", "full"]},
+    "candidate_id": {"type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,512}$"},
+    "authoritative_full": {"type": "boolean"}
   },
   "allOf": [
-    {"if": {"properties": {"event_name": {"enum": ["pull_request", "merge_group"]}}}, "then": {"required": ["base_sha"]}},
-    {"if": {"properties": {"event_name": {"const": "merge_group"}}}, "then": {"required": ["merge_group_id"]}},
+    {"if": {"properties": {"event_name": {"enum": ["pull_request", "merge_group"]}}}, "then": {"required": ["base_sha"], "properties": {"base_sha": {"type": "string"}}}},
+    {"if": {"properties": {"event_name": {"const": "merge_group"}}}, "then": {"required": ["merge_group_id"], "properties": {"merge_group_id": {"type": "string"}}}},
     {"if": {"not": {"properties": {"status": {"const": "passed"}}}}, "then": {"required": ["reason"]}}
   ]
 }

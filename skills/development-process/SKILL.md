@@ -28,9 +28,11 @@ metadata or agent governance.
    The exact-SHA gate requires a clean worktree. A dirty diagnostic must be
    explicitly opted into and recorded as `ambiguous`; it never authorizes
    merge or release. For a release train, require a synthetic merge SHA, link
-   the candidate with `--train`, attest the single Full CI receipt with
-   `train-attest`, and pass only the resulting `*-go.json` train to
-   `decide --train`.
+   the candidate with the consumer adapter's `--train` operation, attest the
+   single Full CI receipt with its `train-attest` operation, and pass only the
+   resulting `*-go.json` train to the adapter's `decide --train` operation.
+   The portable `harness-check` CLI validates the contracts; it does not
+   invent product-specific freeze, CI orchestration or deployment commands.
 6. Test a selected SHA in the consumer's single Dev target with a lock,
    atomic manifest, smoke checks and reversible promotion. Keep production
    origins, credentials and data outside the Dev adapter.
