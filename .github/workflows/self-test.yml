@@ -50,7 +50,7 @@ jobs:
       - name: Check pull-request metadata validator CLI
         run: |
           body="$RUNNER_TEMP/pr-body.md"
-          cat > "$body" <<EOF
+          cat > "$body" <<'EOF'
           ## Feature identity
           - Feature ID: `F216`
           - Umbrella issue: `#6090`
@@ -58,7 +58,7 @@ jobs:
 
           ## Как проверено
           - `ci --fast`: passed
-          - Exact source SHA: $EXPECTED_SOURCE_SHA
+          - Exact source SHA: EXPECTED_SOURCE_SHA_PLACEHOLDER
 
           ## Risk / validation lane
           - Lane: significant-feature
@@ -72,6 +72,7 @@ jobs:
           ## Перед merge
           - evidence recorded
           EOF
+          sed -i "s/EXPECTED_SOURCE_SHA_PLACEHOLDER/$EXPECTED_SOURCE_SHA/" "$body"
           ./bin/harness-check --pr-body-file "$body" --feature-id F216 --expected-source-sha "$EXPECTED_SOURCE_SHA"
 
       - name: Verify runtime version
