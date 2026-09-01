@@ -358,22 +358,31 @@ def legacy(spec: Path) -> list[str]:
     if len(classifications) != 1:
         return [f"{spec}: Legacy Impact classification is invalid"]
     if classifications[0].lower() == "retain-with-exception":
-        for token in ("owner", "expiry", "trigger", "risk", "validation", "retirement task"):
-            field = re.search(
-                rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(token)}(?:\*\*)?[ \t]*:[ \t]*(\S.*)$",
+        fields = {
+            "owner": "Owner",
+            "expiry": "Expiry",
+            "removal trigger": "Removal trigger",
+            "risk": "Risk",
+            "validation": "Validation",
+            "retirement task": "Retirement task",
+        }
+        values: dict[str, str] = {}
+        for key, label in fields.items():
+            matches = re.findall(
+                rf"^[ \t]*(?:[-*][ \t]*)?(?:\*\*)?{re.escape(label)}(?:\*\*)?[ \t]*:[ \t]*(\S.*)$",
                 section,
                 re.IGNORECASE | re.MULTILINE,
             )
-            if not field:
+            if len(matches) != 1 or not matches[0].strip():
                 return [f"{spec}: compatibility exception needs owner, expiry, trigger, risk, validation and retirement task"]
-            if token == "expiry":
-                value = field.group(1).strip().strip("`'\"")
-                try:
-                    expiry = dt.date.fromisoformat(value)
-                except ValueError:
-                    return [f"{spec}: compatibility exception needs an ISO expiry date"]
-                if expiry < dt.date.today():
-                    return [f"{spec}: expired legacy exception {value}"]
+            values[key] = matches[0].strip()
+        value = values["expiry"].strip("`'\"")
+        try:
+            expiry = dt.date.fromisoformat(value)
+        except ValueError:
+            return [f"{spec}: compatibility exception needs an ISO expiry date"]
+        if expiry < dt.date.today():
+            return [f"{spec}: expired legacy exception {value}"]
     return []
 
 
@@ -698,6 +707,9 @@ def package_safety(package_root: Path) -> list[str]:
             continue
         if path.is_dir() or ".git" in path.parts:
             continue
+        if "build" in relative.parts:
+            errors.append(f"generated artifact is not publishable: {relative}")
+            continue
         if path.suffix in {".pyc", ".pyo"} or ".egg-info" in path.parts or path.name in {".DS_Store"}:
             errors.append(f"generated artifact is not publishable: {relative}")
             continue
@@ -805,18 +817,18 @@ def self_test() -> int:
         (root / "specs/001-example/spec.md").write_text(
             "# Example\n\n## Legacy Impact\n\n"
             "Classification: retain-with-exception\n"
-            "owner: platform\nexpiry: 2099-12-31\ntrigger: migration complete\n"
-            "risk: bounded compatibility risk\nvalidation: smoke test\n"
-            "retirement task: T999\n",
+            "Owner: platform\nExpiry: 2099-12-31\nRemoval trigger: migration complete\n"
+            "Risk: bounded compatibility risk\nValidation: smoke test\n"
+            "Retirement task: T999\n",
             encoding="utf-8",
         )
         assert legacy(root / "specs/001-example/spec.md") == []
         (root / "specs/001-example/spec.md").write_text(
             "# Example\n\n## Legacy Impact\n\n"
             "Classification: retain-with-exception\n"
-            "owner: platform\nexpiry: yesterday\ntrigger: migration complete\n"
-            "risk: bounded compatibility risk\nvalidation: smoke test\n"
-            "retirement task: T999\n",
+            "Owner: platform\nExpiry: yesterday\nRemoval trigger: migration complete\n"
+            "Risk: bounded compatibility risk\nValidation: smoke test\n"
+            "Retirement task: T999\n",
             encoding="utf-8",
         )
         assert any("ISO expiry date" in error for error in legacy(root / "specs/001-example/spec.md"))
@@ -825,6 +837,10 @@ def self_test() -> int:
         (package / "src/dev_harness/validators.py").write_text(
             "pass" + "word = \"" + "x" * 24 + "\"\n", encoding="utf-8"
         )
+        assert package_safety(package)
+        build = package / "build"
+        build.mkdir()
+        (build / "generated.py").write_text("generated = True\n", encoding="utf-8")
         assert package_safety(package)
         documentation = package / "README.md"
         documentation.write_text("api" + '_key = "RealCredential123456"\n', encoding="utf-8")
