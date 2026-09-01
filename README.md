@@ -122,8 +122,10 @@ each included PR. PR receipts target their declared PR SHA; merge-group
 receipts target `synthetic_merge_sha` and cover exactly the train PR set.
 Authoritative CI is a passed `workflow_dispatch` receipt with `lane=full` and
 `authoritative_full=true`, targeting the synthetic merge SHA. An `approved`
-train must include a synthetic merge SHA, passed/clean lineage receipts and
-that one authoritative full receipt.
+train must include a synthetic merge SHA, at least one merge-group receipt that
+covers the complete declared PR set, passed/clean lineage receipts and that one
+authoritative full receipt; a synthetic SHA without merge-group lineage cannot
+authorize a release.
 
 The package scan is intentionally run before building or installing the
 package: generated `build/`, `*.egg-info/` and bytecode files are not

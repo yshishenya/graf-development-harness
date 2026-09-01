@@ -43,9 +43,11 @@
     {
       "if": {"properties": {"decision": {"const": "approved"}}},
       "then": {
-        "required": ["authoritative_full_ci_receipt", "synthetic_merge_sha"],
+        "required": ["authoritative_full_ci_receipt", "synthetic_merge_sha", "merge_group_ids", "merge_group_receipts"],
         "properties": {
           "synthetic_merge_sha": {"type": "string"},
+          "merge_group_ids": {"minItems": 1},
+          "merge_group_receipts": {"minItems": 1},
           "authoritative_full_ci_receipt": {
             "type": "object",
             "properties": {"status": {"const": "passed"}}

@@ -487,6 +487,12 @@ def release_train(data: Any) -> list[str]:
         errors.append("approved release train requires authoritative_full_ci_receipt")
     if decision == "approved" and synthetic is None:
         errors.append("approved release train requires synthetic_merge_sha")
+    if decision == "approved" and not merge_group_ids:
+        errors.append("approved release train requires merge_group_ids and merge-group lineage receipts")
+    if decision == "approved" and not isinstance(merge_receipts, list):
+        errors.append("approved release train requires merge_group_receipts")
+    elif decision == "approved" and isinstance(merge_receipts, list) and not merge_receipts:
+        errors.append("approved release train requires at least one merge-group receipt")
     rollback = data.get("rollback_target")
     if not isinstance(rollback, str) or not _KEY.fullmatch(rollback):
         errors.append("rollback_target must be a safe non-empty string")
@@ -592,6 +598,7 @@ def self_test() -> None:
         "decision": "approved",
     }
     assert release_train(synthetic_train) == []
+    assert release_train({**synthetic_train, "merge_group_ids": [], "merge_group_receipts": []})
     assert release_train({**synthetic_train, "merge_group_receipts": [{**merge_receipt, "pull_request_numbers": [7]}]})
     assert release_train({**synthetic_train, "authoritative_full_ci_receipt": {**authoritative, "lane": "fast"}})
     assert release_train({**synthetic_train, "authoritative_full_ci_receipt": {**authoritative, "authoritative_full": False}})
