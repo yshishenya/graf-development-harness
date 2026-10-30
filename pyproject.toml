@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "development-process-harness"
-version = "0.1.13"
+version = "0.1.14"
 description = "Portable dependency-free governance validators"
 requires-python = ">=3.9"
-license = "MIT"
+license = "LicenseRef-GRAF-Harness"
 license-files = ["LICENSE"]
 
 [project.scripts]

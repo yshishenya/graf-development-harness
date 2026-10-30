@@ -139,10 +139,10 @@ must preserve the exact-SHA, loopback-only, one-active-target and fail-closed
 contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
-The current public release is pinned at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.12`.
-This branch prepares the next candidate `v0.1.13`; it is not a public release
-until the PR is merged and the immutable tag and GitHub Release exist.
+This source targets `v0.1.14`; publication requires the PR to be merged and
+both the immutable tag and GitHub Release to exist at
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.14`.
+The previous published release and rollback ref are `v0.1.13`.
 Consumers must keep pinning the published immutable release and update its
 migration notes and rollback ref together.
 
@@ -157,4 +157,12 @@ Migration from `v0.1.10` to `v0.1.11`
 fixed the runtime package-version declaration. The portable feature-context
 schema and copyable templates were introduced in `v0.1.10`. Consumers should
 run the same self-test and package scan after updating their pinned ref.
-Rollback is the immutable `v0.1.12` ref.
+Migration from `v0.1.13` to `v0.1.14` fixes package scanning of quoted JSON
+keys and prefixed credential names. Existing CLI and validator APIs are unchanged.
+The original `LICENSE` text is unchanged; package metadata now identifies that
+custom text as `LicenseRef-GRAF-Harness` instead of claiming the full standard MIT
+text. There are no bundled third-party runtime dependencies or binary assets.
+Git history and the source inventory are reviewed before publication; these
+checks do not establish universal detection of secrets or a legal warranty.
+Rollback is the immutable `v0.1.13` ref. It retains the known scanner gaps, so
+return to `v0.1.14` after a rollback check and scan release inputs with the fix.
