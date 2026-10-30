@@ -139,10 +139,10 @@ must preserve the exact-SHA, loopback-only, one-active-target and fail-closed
 contracts. Each published version is immutable SemVer and requires a checksum,
 migration notes, secret/path scan and a rollback ref.
 
-This source targets `v0.1.14`; publication requires the PR to be merged and
+This source targets `v0.1.15`; publication requires the PR to be merged and
 both the immutable tag and GitHub Release to exist at
-`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.14`.
-The previous published release and rollback ref are `v0.1.13`.
+`https://github.com/yshishenya/graf-development-harness/releases/tag/v0.1.15`.
+The previous published release and rollback ref are `v0.1.14`.
 Consumers must keep pinning the published immutable release and update its
 migration notes and rollback ref together.
 
@@ -164,5 +164,8 @@ custom text as `LicenseRef-GRAF-Harness` instead of claiming the full standard M
 text. There are no bundled third-party runtime dependencies or binary assets.
 Git history and the source inventory are reviewed before publication; these
 checks do not establish universal detection of secrets or a legal warranty.
-Rollback is the immutable `v0.1.13` ref. It retains the known scanner gaps, so
-return to `v0.1.14` after a rollback check and scan release inputs with the fix.
+Migration from `v0.1.14` to `v0.1.15` makes the empty CDPATH assignment explicit
+in the source launcher and adds shellcheck to the existing CI matrix. The late
+lint check of v0.1.14 reported SC1007; it was not a prepublication pass.
+Rollback is the immutable `v0.1.14` ref; it retains that lint warning, while
+retaining the credential-scanning fix. v0.1.13 still has the known scanner gaps.
