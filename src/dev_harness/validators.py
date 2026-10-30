@@ -721,7 +721,7 @@ def package_safety(package_root: Path) -> list[str]:
         re.IGNORECASE,
     )
     credential_assignment = re.compile(
-        r"(?:^\s*(?:[-*]\s*)?(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url)\s*[:=]\s*['\"]?"
+        r"(?:(?:^\s*(?:[-*]\s*)?|[,{]\s*)['\"]?(?:[A-Za-z0-9]+_)*(?:api[_ -]?key|secret|password|token|cookie|signed[-_ ]?url)['\"]?\s*[:=]\s*['\"]?"
         r"|^\s*authorization\s*:\s*bearer\s+['\"]?)"
         r"(?!response\b|request\b|value\b|result\b|none\b|null\b|true\b|false\b)"
         r"[A-Za-z0-9][A-Za-z0-9_./+=:-]{7,}",
@@ -886,6 +886,33 @@ def self_test() -> int:
             "Authorization: " + "Bearer abcdefgh\n", encoding="utf-8"
         )
         assert package_safety(bearer_package)
+
+        assignment_package = root / "assignment-package"
+        assignment_package.mkdir()
+        assignment = assignment_package / "config.txt"
+        value = "synthetic-" * 3
+        for text in (
+            json.dumps({"api_key": value}),
+            json.dumps({"enabled": True, "token": value}),
+            json.dumps({"password": value}, indent=2),
+            "{'secret': '" + value + "'}",
+            '"cookie": "' + value + '"',
+            f"GITHUB_TOKEN={value}",
+            f"SERVICE_GITHUB_TOKEN={value}",
+            f"APP_API_KEY={value}",
+            f"DB_PASSWORD={value}",
+            f"SIGNED_URL={value}",
+            f"Authorization: Bearer {value}",
+        ):
+            assignment.write_text(text, encoding="utf-8")
+            assert package_safety(assignment_package) == ["forbidden secret/private content: config.txt"]
+        for text in (
+            "Use `secret:` and `password =` as field names.\n",
+            'config = {"api_key": value}\n',
+            "token = result\n",
+        ):
+            assignment.write_text(text, encoding="utf-8")
+            assert package_safety(assignment_package) == []
 
         # Context is bounded and duplicate stable rules are rejected before
         # they consume the always-on agent prompt budget.
